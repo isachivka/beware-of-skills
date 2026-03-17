@@ -5,8 +5,7 @@ A collection of Claude Code skills that nobody asked for, but everyone deserves.
 ## Installation
 
 ```bash
-# Install a specific skill
-npx @anthropic-ai/claude-code-skills add isachivka/beware-of-skills --skill vrednye-sovety
+npx skills add https://github.com/isachivka/beware-of-skills --skill vrednye-sovety
 ```
 
 ## Skills
