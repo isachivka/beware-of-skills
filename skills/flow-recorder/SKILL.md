@@ -7,7 +7,13 @@ description: "Record browser workflows and generate autonomous skills from them.
 
 You are a meta-skill. Your job is to walk the user through a routine web process once, record every step, and turn the recording into a standalone skill that can replay the process autonomously.
 
-All browser interaction is done via **agent-browser** CLI (`agent-browser` commands executed through Bash).
+All browser interaction is done via **agent-browser** CLI. Before you begin, read the agent-browser documentation to understand its commands and semantic locators:
+
+```bash
+npx skills add vercel-labs/agent-browser
+```
+
+Refer to the agent-browser skill for the full command reference (open, snapshot, find, click, fill, wait, etc.).
 
 ## Modes
 
@@ -49,9 +55,7 @@ If unreachable — tell the user. They may need a VPN or the site may be down.
 
 ### Step 3. Open browser
 
-```bash
-agent-browser open <URL>
-```
+Navigate to the site URL using agent-browser.
 
 ### Step 4. Authentication
 
@@ -62,14 +66,7 @@ Depending on the type:
 
   Wait for confirmation. Do nothing until the user confirms.
 
-- **credentials**: Ask the user for login and password. Then take a snapshot, find the login form fields, fill them in, and click sign-in:
-  ```bash
-  agent-browser snapshot
-  agent-browser find label "Email" fill "user@example.com"
-  agent-browser find label "Password" fill "secret123"
-  agent-browser find role button click --name "Sign In"
-  ```
-  Record the auth steps in the flow log, and hardcode the login and password directly into the generated skill — so that on subsequent runs authentication happens automatically with no prompts.
+- **credentials**: Ask the user for login and password. Then take a snapshot, find the login form fields, fill them in, and click sign-in. Record the auth steps in the flow log, and hardcode the login and password directly into the generated skill — so that on subsequent runs authentication happens automatically with no prompts.
 
 - **none**: Skip this step.
 
@@ -82,11 +79,7 @@ Say:
 Then work like this:
 
 1. User says: "click the Create button" / "fill the Name field with Test" / "select A/B from the Type dropdown".
-2. You take a snapshot, find the element, perform the action:
-   ```bash
-   agent-browser snapshot
-   agent-browser find text "Create" click
-   ```
+2. You take a snapshot, find the element using semantic locators, and perform the action.
 3. **Record the step** in your internal log (see format below).
 4. If the action succeeds — confirm briefly: "Done, clicked Create. What's next?"
 5. If the element is not found or something went wrong — **stop and ask the user**. Do not guess.
@@ -114,19 +107,19 @@ Step 3: Select "A/B Test" from "Type" dropdown
 
 #### How to identify elements
 
-When recording a step, use **agent-browser semantic locators** in this priority order:
+When recording a step, use agent-browser **semantic locators** in this priority order:
 
-1. **`find text`** — visible text on the element (most reliable)
-2. **`find label`** — associated label text (for form fields)
-3. **`find placeholder`** — placeholder text (for inputs)
-4. **`find testid`** — `data-testid` attribute (set by developers, stable)
-5. **`find role`** — ARIA role + `--name` (e.g. `find role button click --name "Submit"`)
-6. **`find title`** / **`find alt`** — title or alt attributes
-7. **CSS selector / id** — `agent-browser click "#submit-form"` (last resort)
+1. **Visible text** (`find text`) — most reliable, only changes on redesign
+2. **Label** (`find label`) — for form fields
+3. **Placeholder** (`find placeholder`) — for inputs
+4. **Test ID** (`find testid`) — `data-testid`, set by developers, stable
+5. **ARIA role** (`find role` + `--name`) — semantic role matching
+6. **Title / alt** (`find title`, `find alt`)
+7. **CSS selector / HTML id** — last resort, only if stable
 
 **Do NOT rely on:**
-- CSS classes (`class="css-1a2b3c"`, `class="sc-dkzDqf"`) — often hashed at build time
-- Snapshot ref numbers (`@e12`) — they change on every page render, never save them in the skill
+- CSS classes — often hashed at build time
+- Snapshot ref numbers (`@e12`) — they change on every render, never save them in the skill
 
 #### Variables
 
@@ -161,7 +154,7 @@ description: "<description>. Triggers: '<flow-name>', '<aliases>', '<keywords>'.
 
 <Description: what this flow does.>
 
-All browser interaction is done via **agent-browser** CLI.
+All browser interaction is done via **agent-browser** CLI. Refer to the agent-browser skill for the full command reference.
 
 ## Site
 
@@ -188,27 +181,26 @@ If unreachable — tell the user (may need VPN).
 
 ### 2. Open browser
 
-\`\`\`bash
-agent-browser open <URL>
-\`\`\`
+Open <URL> using agent-browser.
 
 ### 3. Authentication
 <!-- type: manual / credentials / none -->
 <!-- manual: ask user to log in, wait for confirmation -->
-<!-- credentials: fill login form with hardcoded credentials using agent-browser find/fill -->
+<!-- credentials: fill login form with hardcoded credentials -->
 <!-- none: skip -->
 
 ### 4-N. [Recorded steps]
 
 For each step:
-- Take a snapshot: `agent-browser snapshot`
+- Take a snapshot
 - Verify anchor elements are in place (page title, navbar, key buttons)
 - If everything looks familiar — proceed
 - If something has changed — stop and ask the user
 
 #### Step 4. <Description>
-- Command: `agent-browser find text "..." click`
-- Fallback: `agent-browser find testid "..." click`
+- Find by: <semantic locator — text / label / testid / role>
+- Fallback: <alternative locator>
+- Action: <click / fill / select / etc.>
 - Expect: <what should happen after>
 
 ...
@@ -232,9 +224,9 @@ When the user says "update flow X" or "let's update <name>":
 
 1. Read the existing skill from `~/.claude/skills/<flow-name>/SKILL.md`.
 2. Show the user the step list: "Here are the current steps: 1... 2... 3... Shall we go through them in order?"
-3. Open the browser (`agent-browser open <URL>`), handle authentication.
+3. Open the browser, handle authentication.
 4. Walk through the steps. At each step:
-   - Take a snapshot (`agent-browser snapshot`).
+   - Take a snapshot.
    - If the element is in place — execute and say: "Step N done, same as before. Next?"
    - If the user says "this is different now" — record the new version of the step.
    - If the user says "there's a new step here" — insert it.
@@ -246,7 +238,7 @@ When the user says "update flow X" or "let's update <name>":
 ## Important rules
 
 1. **Never guess elements**. If you don't see the button — ask.
-2. **Always take a snapshot before acting**. That's your eyes: `agent-browser snapshot`.
+2. **Always take a snapshot before acting**. That's your eyes.
 3. **Variables > hardcode**. If a value can change between runs — make it a variable.
 4. **Log changes** in the "Changelog" section of the generated skill.
 5. **One flow = one skill**. Don't mix multiple processes into a single skill.
