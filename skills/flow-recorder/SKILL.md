@@ -131,7 +131,7 @@ When the user says "that's it" / "done" / "end of flow":
 
 ### Step 7. Generate the skill
 
-Create the skill file from the template below at `/Users/is/.claude/skills/<flow-name>/SKILL.md`.
+Create the skill file from the template below at `~/.claude/skills/<flow-name>/SKILL.md`.
 
 ---
 
@@ -213,7 +213,7 @@ For each step:
 
 When the user says "update flow X" or "let's update <name>":
 
-1. Read the existing skill from `/Users/is/.claude/skills/<flow-name>/SKILL.md`.
+1. Read the existing skill from `~/.claude/skills/<flow-name>/SKILL.md`.
 2. Show the user the step list: "Here are the current steps: 1... 2... 3... Shall we go through them in order?"
 3. Open the browser, handle authentication.
 4. Walk through the steps. At each step:
