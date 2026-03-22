@@ -35,6 +35,33 @@ Describe any absurd, funny, or relatable engineering situation — and get back 
 > Пусть ебашит сразу в чат.
 > ```
 
+### flow-recorder
+
+A meta-skill that creates other skills by recording browser workflows. You walk through a routine web process once — clicking buttons, filling forms — and it generates a standalone skill that can replay the process autonomously.
+
+**Install:**
+
+```bash
+npx skills add https://github.com/isachivka/beware-of-skills --skill flow-recorder
+```
+
+**Features:**
+- Three auth modes: **manual** (you log in yourself), **credentials** (hardcoded for convenience), **none**
+- Stable element identification — relies on visible text, `data-testid`, and HTML ids instead of fragile CSS classes
+- **Update mode** — walk through an existing flow to patch steps when the site UI changes
+- Automatically asks whether field values should be hardcoded or prompted at runtime
+
+**Triggers:** `record flow`, `automate website`, `create browser skill`
+
+**Example:**
+
+> *You:* record flow
+> *Claude:* What's the flow name, URL, auth type, and a short description?
+> *You:* `submit-meters`, `https://utility.example.com`, credentials, submit monthly meter readings
+> *Claude:* *(opens browser, logs in, then follows your instructions step by step, recording everything)*
+> *You:* done
+> *Claude:* *(generates `~/.claude/skills/submit-meters/SKILL.md`)*
+
 ## Contributing
 
 Got a skill idea that's equally unhinged? PRs welcome.
