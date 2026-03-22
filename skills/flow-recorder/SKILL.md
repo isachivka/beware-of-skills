@@ -7,6 +7,8 @@ description: "Record browser workflows and generate autonomous skills from them.
 
 You are a meta-skill. Your job is to walk the user through a routine web process once, record every step, and turn the recording into a standalone skill that can replay the process autonomously.
 
+All browser interaction is done via **agent-browser** CLI (`agent-browser` commands executed through Bash).
+
 ## Modes
 
 This skill operates in two modes:
@@ -47,7 +49,9 @@ If unreachable — tell the user. They may need a VPN or the site may be down.
 
 ### Step 3. Open browser
 
-Open the browser via Playwright MCP and navigate to the site URL.
+```bash
+agent-browser open <URL>
+```
 
 ### Step 4. Authentication
 
@@ -58,7 +62,14 @@ Depending on the type:
 
   Wait for confirmation. Do nothing until the user confirms.
 
-- **credentials**: Ask the user for login and password. Then find the login form fields on the page (snapshot), fill them in, and click the sign-in button. Record the auth steps in the flow log, and hardcode the login and password directly into the generated skill — so that on subsequent runs authentication happens automatically with no prompts.
+- **credentials**: Ask the user for login and password. Then take a snapshot, find the login form fields, fill them in, and click sign-in:
+  ```bash
+  agent-browser snapshot
+  agent-browser find label "Email" fill "user@example.com"
+  agent-browser find label "Password" fill "secret123"
+  agent-browser find role button click --name "Sign In"
+  ```
+  Record the auth steps in the flow log, and hardcode the login and password directly into the generated skill — so that on subsequent runs authentication happens automatically with no prompts.
 
 - **none**: Skip this step.
 
@@ -71,7 +82,11 @@ Say:
 Then work like this:
 
 1. User says: "click the Create button" / "fill the Name field with Test" / "select A/B from the Type dropdown".
-2. You take a page snapshot (browser_snapshot), find the element, perform the action.
+2. You take a snapshot, find the element, perform the action:
+   ```bash
+   agent-browser snapshot
+   agent-browser find text "Create" click
+   ```
 3. **Record the step** in your internal log (see format below).
 4. If the action succeeds — confirm briefly: "Done, clicked Create. What's next?"
 5. If the element is not found or something went wrong — **stop and ask the user**. Do not guess.
@@ -82,37 +97,36 @@ Keep a step list in this format (this is your draft — the user doesn't see it)
 
 ```
 Step 1: Click "Create Experiment" button in the navbar
-  - action: browser_click
-  - find by: button text "Create Experiment"
-  - fallback selector: [data-testid="create-experiment-btn"] or #create-experiment
+  - command: agent-browser find text "Create Experiment" click
+  - fallback: agent-browser find testid "create-experiment-btn" click
   - expect: experiment creation form appears
 
 Step 2: Fill "Experiment Name" field
-  - action: browser_fill_form
-  - find by: label "Experiment Name" or placeholder "Enter experiment name"
-  - fallback selector: [data-testid="experiment-name-input"] or #experiment-name
-  - value: "{experiment_name}"
+  - command: agent-browser find label "Experiment Name" fill "{experiment_name}"
+  - fallback: agent-browser find placeholder "Enter experiment name" fill "{experiment_name}"
   - variable: experiment_name (asked at runtime)
 
 Step 3: Select "A/B Test" from "Type" dropdown
-  - action: browser_click on dropdown, then browser_click on option
-  - find by: label "Type", then option text "A/B Test"
-  - fallback selector: [data-testid="type-select"]
+  - command: agent-browser find label "Type" click
+  - then: agent-browser find text "A/B Test" click
+  - fallback: agent-browser find testid "type-select" click
 ```
 
 #### How to identify elements
 
-When recording a step, collect **stable identifiers** for each element in this priority order:
+When recording a step, use **agent-browser semantic locators** in this priority order:
 
-1. **Visible text** — what's written on the button / in the label / in the placeholder (most reliable, only changes on redesign)
-2. **data-attributes** — `data-testid`, `data-qa`, `data-id` and similar (set by developers intentionally, stable)
-3. **HTML id** — `id="submit-form"` (stable unless auto-generated)
-4. **ARIA attributes** — `aria-label`, `role`
-5. **Structural position** — "third button in the navbar", "first input in the form"
+1. **`find text`** — visible text on the element (most reliable)
+2. **`find label`** — associated label text (for form fields)
+3. **`find placeholder`** — placeholder text (for inputs)
+4. **`find testid`** — `data-testid` attribute (set by developers, stable)
+5. **`find role`** — ARIA role + `--name` (e.g. `find role button click --name "Submit"`)
+6. **`find title`** / **`find alt`** — title or alt attributes
+7. **CSS selector / id** — `agent-browser click "#submit-form"` (last resort)
 
 **Do NOT rely on:**
 - CSS classes (`class="css-1a2b3c"`, `class="sc-dkzDqf"`) — often hashed at build time
-- Auto-generated ref numbers from snapshot — they change on every page render
+- Snapshot ref numbers (`@e12`) — they change on every page render, never save them in the skill
 
 #### Variables
 
@@ -147,6 +161,8 @@ description: "<description>. Triggers: '<flow-name>', '<aliases>', '<keywords>'.
 
 <Description: what this flow does.>
 
+All browser interaction is done via **agent-browser** CLI.
+
 ## Site
 
 - URL: <url>
@@ -172,26 +188,27 @@ If unreachable — tell the user (may need VPN).
 
 ### 2. Open browser
 
-Navigate to <URL> via Playwright MCP (browser_navigate).
+\`\`\`bash
+agent-browser open <URL>
+\`\`\`
 
 ### 3. Authentication
 <!-- type: manual / credentials / none -->
 <!-- manual: ask user to log in, wait for confirmation -->
-<!-- credentials: fill login form with hardcoded credentials -->
+<!-- credentials: fill login form with hardcoded credentials using agent-browser find/fill -->
 <!-- none: skip -->
 
 ### 4-N. [Recorded steps]
 
 For each step:
-- Take a snapshot (browser_snapshot)
+- Take a snapshot: `agent-browser snapshot`
 - Verify anchor elements are in place (page title, navbar, key buttons)
 - If everything looks familiar — proceed
 - If something has changed — stop and ask the user
 
 #### Step 4. <Description>
-- Action: <what to do>
-- Find by: <visible text / data-testid / id / aria-label — in priority order>
-- Fallback selector: <alternative way to find the element>
+- Command: `agent-browser find text "..." click`
+- Fallback: `agent-browser find testid "..." click`
 - Expect: <what should happen after>
 
 ...
@@ -215,9 +232,9 @@ When the user says "update flow X" or "let's update <name>":
 
 1. Read the existing skill from `~/.claude/skills/<flow-name>/SKILL.md`.
 2. Show the user the step list: "Here are the current steps: 1... 2... 3... Shall we go through them in order?"
-3. Open the browser, handle authentication.
+3. Open the browser (`agent-browser open <URL>`), handle authentication.
 4. Walk through the steps. At each step:
-   - Take a snapshot.
+   - Take a snapshot (`agent-browser snapshot`).
    - If the element is in place — execute and say: "Step N done, same as before. Next?"
    - If the user says "this is different now" — record the new version of the step.
    - If the user says "there's a new step here" — insert it.
@@ -229,8 +246,9 @@ When the user says "update flow X" or "let's update <name>":
 ## Important rules
 
 1. **Never guess elements**. If you don't see the button — ask.
-2. **Always take a snapshot before acting**. That's your eyes.
+2. **Always take a snapshot before acting**. That's your eyes: `agent-browser snapshot`.
 3. **Variables > hardcode**. If a value can change between runs — make it a variable.
 4. **Log changes** in the "Changelog" section of the generated skill.
 5. **One flow = one skill**. Don't mix multiple processes into a single skill.
 6. **Ask after each flow**: "Record another flow?"
+7. **Never save snapshot refs** (`@e12`). Always use semantic locators (`find text`, `find label`, `find testid`).
