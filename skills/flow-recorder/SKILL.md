@@ -7,13 +7,7 @@ description: "Record browser workflows and generate autonomous skills from them.
 
 You are a meta-skill. Your job is to walk the user through a routine web process once, record every step, and turn the recording into a standalone skill that can replay the process autonomously.
 
-All browser interaction is done via **agent-browser** CLI. Before you begin, read the agent-browser documentation to understand its commands and semantic locators:
-
-```bash
-npx skills add vercel-labs/agent-browser
-```
-
-Refer to the agent-browser skill for the full command reference (open, snapshot, find, click, fill, wait, etc.).
+All browser interaction is done via the **agent-browser** skill. Before you begin, invoke the agent-browser skill to understand how to interact with the browser.
 
 ## Modes
 
@@ -55,7 +49,7 @@ If unreachable — tell the user. They may need a VPN or the site may be down.
 
 ### Step 3. Open browser
 
-Navigate to the site URL using agent-browser.
+Navigate to the site URL using the agent-browser skill.
 
 ### Step 4. Authentication
 
@@ -90,36 +84,37 @@ Keep a step list in this format (this is your draft — the user doesn't see it)
 
 ```
 Step 1: Click "Create Experiment" button in the navbar
-  - command: agent-browser find text "Create Experiment" click
-  - fallback: agent-browser find testid "create-experiment-btn" click
+  - find by: text "Create Experiment"
+  - fallback: testid "create-experiment-btn"
+  - action: click
   - expect: experiment creation form appears
 
 Step 2: Fill "Experiment Name" field
-  - command: agent-browser find label "Experiment Name" fill "{experiment_name}"
-  - fallback: agent-browser find placeholder "Enter experiment name" fill "{experiment_name}"
+  - find by: label "Experiment Name"
+  - fallback: placeholder "Enter experiment name"
+  - action: fill "{experiment_name}"
   - variable: experiment_name (asked at runtime)
 
 Step 3: Select "A/B Test" from "Type" dropdown
-  - command: agent-browser find label "Type" click
-  - then: agent-browser find text "A/B Test" click
-  - fallback: agent-browser find testid "type-select" click
+  - find by: label "Type" → click, then text "A/B Test" → click
+  - fallback: testid "type-select"
 ```
 
 #### How to identify elements
 
-When recording a step, use agent-browser **semantic locators** in this priority order:
+When recording a step, use **semantic locators** in this priority order:
 
-1. **Visible text** (`find text`) — most reliable, only changes on redesign
-2. **Label** (`find label`) — for form fields
-3. **Placeholder** (`find placeholder`) — for inputs
-4. **Test ID** (`find testid`) — `data-testid`, set by developers, stable
-5. **ARIA role** (`find role` + `--name`) — semantic role matching
-6. **Title / alt** (`find title`, `find alt`)
+1. **Visible text** — most reliable, only changes on redesign
+2. **Label** — for form fields
+3. **Placeholder** — for inputs
+4. **Test ID** — `data-testid`, set by developers, stable
+5. **ARIA role** — semantic role matching
+6. **Title / alt**
 7. **CSS selector / HTML id** — last resort, only if stable
 
 **Do NOT rely on:**
 - CSS classes — often hashed at build time
-- Snapshot ref numbers (`@e12`) — they change on every render, never save them in the skill
+- Snapshot ref numbers — they change on every render, never save them in the skill
 
 #### Variables
 
@@ -154,7 +149,7 @@ description: "<description>. Triggers: '<flow-name>', '<aliases>', '<keywords>'.
 
 <Description: what this flow does.>
 
-All browser interaction is done via **agent-browser** CLI. Refer to the agent-browser skill for the full command reference.
+All browser interaction is done via the **agent-browser** skill.
 
 ## Site
 
@@ -181,7 +176,7 @@ If unreachable — tell the user (may need VPN).
 
 ### 2. Open browser
 
-Open <URL> using agent-browser.
+Open <URL> using the agent-browser skill.
 
 ### 3. Authentication
 <!-- type: manual / credentials / none -->
@@ -243,4 +238,4 @@ When the user says "update flow X" or "let's update <name>":
 4. **Log changes** in the "Changelog" section of the generated skill.
 5. **One flow = one skill**. Don't mix multiple processes into a single skill.
 6. **Ask after each flow**: "Record another flow?"
-7. **Never save snapshot refs** (`@e12`). Always use semantic locators (`find text`, `find label`, `find testid`).
+7. **Never save snapshot refs**. Always use semantic locators (text, label, testid, role).
