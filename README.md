@@ -62,6 +62,27 @@ npx skills add https://github.com/isachivka/beware-of-skills --skill flow-record
 > *You:* done
 > *Claude:* *(generates `~/.claude/skills/submit-meters/SKILL.md`)*
 
+### agent-pm
+
+Turns Claude into a **manager that does nothing itself** — it orchestrates a fleet of full Claude Code instances running in [agterm](https://github.com/umputun/agterm) sessions: one worker per repo/role, delegation with briefs, a 5-minute check loop, PM-held gates (plan/PR review, prod actions), and battle-tested recovery playbooks for degraded workers.
+
+Born from a real production day: a frontend redesign shipped through 3 feedback iterations, a public buglash, a cross-repo fix, and an A/B experiment launch — all driven by one PM agent supervising 4 worker agents.
+
+**Install:**
+
+```bash
+npx skills add https://github.com/isachivka/beware-of-skills --skill agent-pm
+```
+
+**Requires:** the `agterm` skill (all terminal mechanics are delegated to it) and a `claude_yolo` alias (claude with permission checks bypassed).
+
+**Triggers:** "ты менеджер", "ты PM", "оркестрируй агентов", "подними работников", "agent-pm"
+
+**Example:**
+
+> *You:* Ты менеджер по делам document-restoration. Ты ничего не делаешь руками — только даёшь инструкции агентам через agterm и проверяешь их работу.
+> *Claude:* *(maps the sessions, asks who is who, and starts running the show)*
+
 ## Contributing
 
 Got a skill idea that's equally unhinged? PRs welcome.
