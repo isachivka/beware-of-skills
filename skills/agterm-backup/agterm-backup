@@ -1,0 +1,451 @@
+#!/usr/bin/env python3
+"""agterm-backup — bring your running sessions (especially claude, resumed) back
+after an agterm/macOS restart.
+
+Foundation (verified against agterm source):
+- agterm rebuilds the session tree on cold launch keyed by the PERSISTED session
+  UUIDs (AppStore.restore(from:)), so a pane's AGTERM_SESSION_ID is STABLE across a
+  restart. That id is our join key.
+- The "Restore running commands on restart" setting only gates whether a pane also
+  re-runs its captured command; the tree itself (workspaces/sessions/cwds, as plain
+  shells) is always restored. So after a restart panes sit at a shell prompt and we
+  type the resume command into them.
+
+Two capture paths:
+- DURABLE (recommended): a Claude Code hook (capture.py) records
+  AGTERM_SESSION_ID -> claude session_id on every session event. `install` wires it.
+- ONE-SHOT (for sessions already running before the hook existed): `snap` also
+  harvests a session id from a pane's scrollback when `/status` was run there.
+
+Commands:
+    agterm-backup install [--python PATH]
+    agterm-backup status
+    agterm-backup snap [--harvest]
+    agterm-backup restore [--dry-run] [--yes] [--from-live]
+"""
+import sys
+import os
+import re
+import json
+import glob
+import time
+import argparse
+import subprocess
+
+HOME = os.path.expanduser("~")
+STATE_DIR = os.path.join(HOME, ".agterm-backup")
+LIVE_DIR = os.path.join(STATE_DIR, "live")
+SNAP_DIR = os.path.join(STATE_DIR, "snapshots")
+LATEST = os.path.join(STATE_DIR, "snapshot.json")
+SETTINGS = os.path.join(HOME, ".claude", "settings.json")
+SKILL_DIR = os.path.dirname(os.path.abspath(__file__))
+CAPTURE = os.path.join(SKILL_DIR, "capture.py")
+PROJECTS = os.path.join(HOME, ".claude", "projects")
+
+CAPTURE_EVENTS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "Stop"]
+UUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+                     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+
+
+# ----------------------------------------------------------------------------- util
+
+def agtermctl(*args):
+    """Run agtermctl, return parsed JSON (dict) or None on failure."""
+    try:
+        out = subprocess.run(["agtermctl", *args], capture_output=True,
+                             text=True, timeout=15)
+    except Exception:
+        return None
+    if out.returncode != 0:
+        return None
+    try:
+        return json.loads(out.stdout)
+    except Exception:
+        return out.stdout
+
+
+def slug(cwd):
+    """Claude Code's project-dir slug: every non-alphanumeric char -> '-'."""
+    return re.sub(r"[^a-zA-Z0-9]", "-", cwd)
+
+
+def load_tree():
+    d = agtermctl("tree", "--json")
+    if isinstance(d, dict):
+        return d.get("result", {}).get("tree", {})
+    return {}
+
+
+def iter_claude_panes(tree):
+    """Yield (pane_uuid, role, cwd, workspace_name, title, flags, is_shell) for every
+    pane currently running claude (main and split)."""
+    for ws in tree.get("workspaces", []):
+        wsname = ws.get("name")
+        for s in ws.get("sessions", []):
+            pid = (s.get("id") or "").upper()
+            # main / left pane
+            fg = s.get("foreground") or []
+            if fg and os.path.basename(fg[0]) == "claude":
+                yield (pid, "left", s.get("cwd") or "", wsname,
+                       s.get("title") or "", _flags(fg), False)
+            # split / right pane
+            sfg = s.get("splitForeground") or []
+            if sfg and os.path.basename(sfg[0]) == "claude":
+                yield (pid, "right", s.get("splitCwd") or s.get("cwd") or "",
+                       wsname, s.get("title") or "", _flags(sfg), False)
+
+
+def all_panes(tree):
+    """Every (pane_uuid, role, node) so restore can tell if a pane is at a shell."""
+    out = {}
+    for ws in tree.get("workspaces", []):
+        for s in ws.get("sessions", []):
+            pid = (s.get("id") or "").upper()
+            out[(pid, "left")] = s.get("foreground") or []
+            if s.get("split"):
+                out[(pid, "right")] = s.get("splitForeground") or []
+    return out
+
+
+def _flags(argv):
+    """argv after 'claude', dropping any prior --resume/-r/--continue and its value."""
+    rest = list(argv[1:])
+    out = []
+    skip = False
+    for a in rest:
+        if skip:
+            skip = False
+            continue
+        if a in ("--resume", "-r"):
+            skip = True
+            continue
+        if a in ("--continue", "-c", "--fork-session"):
+            continue
+        out.append(a)
+    return out
+
+
+def read_live():
+    """pane_uuid|role -> live record (from the capture hook)."""
+    out = {}
+    for f in glob.glob(os.path.join(LIVE_DIR, "*.json")):
+        try:
+            with open(f) as fh:
+                r = json.load(fh)
+        except Exception:
+            continue
+        key = ((r.get("pane_uuid") or "").upper(), r.get("pane_role") or "left")
+        out[key] = r
+    return out
+
+
+def harvest_scrollback(pane_uuid, cwd):
+    """Deterministic bonus: if `/status` was run in the pane, its scrollback shows
+    'Session ID: <uuid>'. Accept it only if a matching transcript exists in the
+    pane's project dir."""
+    try:
+        out = subprocess.run(["agtermctl", "session", "text", "--all",
+                              "--target", pane_uuid], capture_output=True,
+                             text=True, timeout=15)
+    except Exception:
+        return None
+    if out.returncode != 0:
+        return None
+    proj = os.path.join(PROJECTS, slug(cwd))
+    # scan newest-first: last printed id wins
+    ids = UUID_RE.findall(out.stdout)
+    for cand in reversed(ids):
+        if os.path.exists(os.path.join(proj, cand.lower() + ".jsonl")):
+            return cand.lower()
+    return None
+
+
+# -------------------------------------------------------------------------- install
+
+def cmd_install(args):
+    os.makedirs(LIVE_DIR, exist_ok=True)
+    os.makedirs(SNAP_DIR, exist_ok=True)
+    py = args.python or "/usr/bin/python3"
+    command = "%s %s" % (py, CAPTURE)
+
+    try:
+        with open(SETTINGS) as fh:
+            cfg = json.load(fh)
+    except FileNotFoundError:
+        cfg = {}
+    except Exception as e:
+        print("ERROR: cannot read %s: %s" % (SETTINGS, e))
+        return 1
+
+    # back up before touching it
+    if os.path.exists(SETTINGS):
+        bak = SETTINGS + ".agterm-backup.bak"
+        with open(SETTINGS) as a, open(bak, "w") as b:
+            b.write(a.read())
+        print("backed up settings -> %s" % bak)
+
+    hooks = cfg.setdefault("hooks", {})
+    added = []
+    for event in CAPTURE_EVENTS:
+        groups = hooks.setdefault(event, [])
+        already = any(
+            isinstance(h, dict) and "capture.py" in str(h.get("command", ""))
+            for g in groups if isinstance(g, dict)
+            for h in g.get("hooks", [])
+        )
+        if already:
+            continue
+        groups.append({"hooks": [{"type": "command", "command": command}]})
+        added.append(event)
+
+    with open(SETTINGS, "w") as fh:
+        json.dump(cfg, fh, indent=2, ensure_ascii=False)
+        fh.write("\n")
+
+    if added:
+        print("installed capture hook on: %s" % ", ".join(added))
+    else:
+        print("capture hook already installed on all events")
+    print("command: %s" % command)
+    print("\nNOTE: the hook fires on a session's NEXT event. Already-running "
+          "sessions are captured when they next act (a prompt, a tool call, a turn "
+          "end). Run 'agterm-backup status' to see coverage; 'agterm-backup snap' "
+          "to also harvest ids from /status scrollback.")
+    return 0
+
+
+# --------------------------------------------------------------------------- status
+
+def cmd_status(args):
+    tree = load_tree()
+    live = read_live()
+    claude = list(iter_claude_panes(tree))
+    hook_ok = _hook_installed()
+
+    print("hook installed : %s" % ("yes" if hook_ok else "NO — run: agterm-backup install"))
+    print("live captures  : %d file(s) in %s" % (len(live), LIVE_DIR))
+    age = "-"
+    if os.path.exists(LATEST):
+        age = "%ds ago" % int(time.time() - os.path.getmtime(LATEST))
+    print("last snapshot  : %s" % age)
+    print()
+    print("running claude panes: %d" % len(claude))
+    print("  %-10s %-6s %-28s %-8s %s" % ("pane", "role", "cwd", "state", "session id"))
+    missing = 0
+    for pid, role, cwd, wsname, title, flags, _ in claude:
+        rec = live.get((pid, role))
+        if rec:
+            sid = rec["claude_session_id"][:8] + "…  (hook)"
+        else:
+            sid = "— not captured —"
+            missing += 1
+        print("  %-10s %-6s %-28s %-8s %s"
+              % (pid[:8], role, cwd[:28], wsname or "?", sid))
+    if missing:
+        print("\n%d pane(s) not yet captured. They register on their next activity, "
+              "or run 'agterm-backup snap --harvest' to try scrollback (needs /status "
+              "to have been run there)." % missing)
+    return 0
+
+
+def _hook_installed():
+    try:
+        with open(SETTINGS) as fh:
+            cfg = json.load(fh)
+    except Exception:
+        return False
+    for groups in cfg.get("hooks", {}).values():
+        for g in groups if isinstance(groups, list) else []:
+            if not isinstance(g, dict):
+                continue
+            for h in g.get("hooks", []):
+                if "capture.py" in str(h.get("command", "")):
+                    return True
+    return False
+
+
+# ----------------------------------------------------------------------------- snap
+
+def cmd_snap(args):
+    os.makedirs(SNAP_DIR, exist_ok=True)
+    tree = load_tree()
+    windows = agtermctl("window", "list", "--json")
+    live = read_live()
+
+    panes = []
+    for pid, role, cwd, wsname, title, flags, _ in iter_claude_panes(tree):
+        rec = live.get((pid, role))
+        sid = rec["claude_session_id"] if rec else None
+        source = "hook" if rec else None
+        if not sid and args.harvest:
+            sid = harvest_scrollback(pid, cwd)
+            source = "scrollback" if sid else None
+        panes.append({
+            "pane_uuid": pid, "pane_role": role, "workspace_name": wsname,
+            "cwd": cwd, "session_title": title, "resume_flags": flags,
+            "claude_session_id": sid, "id_source": source,
+        })
+
+    snap = {
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "agterm_version": _agterm_version(),
+        "tree": tree,
+        "windows": windows,
+        "panes": panes,
+    }
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+    path = os.path.join(SNAP_DIR, stamp + ".json")
+    with open(path, "w") as fh:
+        json.dump(snap, fh, indent=1)
+    with open(LATEST, "w") as fh:
+        json.dump(snap, fh, indent=1)
+    _prune_snapshots(keep=20)
+
+    got = sum(1 for p in panes if p["claude_session_id"])
+    print("snapshot -> %s" % path)
+    print("claude panes: %d, with session id: %d, missing: %d"
+          % (len(panes), got, len(panes) - got))
+    for p in panes:
+        mark = p["id_source"] or "MISSING"
+        sid = (p["claude_session_id"] or "")[:8]
+        print("  %-10s %-6s %-24s %-10s %s"
+              % (p["pane_uuid"][:8], p["pane_role"], p["cwd"][:24], mark, sid))
+    return 0
+
+
+def _agterm_version():
+    try:
+        out = subprocess.run(["agtermctl", "--help"], capture_output=True, text=True)
+        # version isn't exposed by agtermctl; read the app bundle
+        p = "/Applications/agterm.app/Contents/Info.plist"
+        v = subprocess.run(["plutil", "-extract", "CFBundleShortVersionString",
+                            "raw", p], capture_output=True, text=True)
+        return v.stdout.strip() or None
+    except Exception:
+        return None
+
+
+def _prune_snapshots(keep=20):
+    files = sorted(glob.glob(os.path.join(SNAP_DIR, "*.json")))
+    for f in files[:-keep]:
+        try:
+            os.unlink(f)
+        except Exception:
+            pass
+
+
+# -------------------------------------------------------------------------- restore
+
+def cmd_restore(args):
+    if args.from_live:
+        tree = load_tree()
+        live = read_live()
+        panes = []
+        for pid, role, cwd, wsname, title, flags, _ in iter_claude_panes(tree):
+            rec = live.get((pid, role))
+            panes.append({
+                "pane_uuid": pid, "pane_role": role, "cwd": cwd,
+                "workspace_name": wsname, "session_title": title,
+                "resume_flags": flags,
+                "claude_session_id": rec["claude_session_id"] if rec else None,
+                "id_source": "hook" if rec else None,
+            })
+        snap = {"panes": panes}
+    else:
+        if not os.path.exists(LATEST):
+            print("no snapshot yet — run 'agterm-backup snap' first (or use --from-live)")
+            return 1
+        with open(LATEST) as fh:
+            snap = json.load(fh)
+
+    tree = load_tree()
+    live_panes = all_panes(tree)  # (pid, role) -> current foreground argv
+
+    plan = []
+    for p in snap["panes"]:
+        sid = p.get("claude_session_id")
+        if not sid:
+            plan.append((p, None, "SKIP: no session id captured"))
+            continue
+        key = (p["pane_uuid"].upper(), p.get("pane_role") or "left")
+        if key not in live_panes:
+            plan.append((p, None, "SKIP: pane not present after restart"))
+            continue
+        fg = live_panes[key]
+        if fg and os.path.basename(fg[0]) == "claude":
+            plan.append((p, None, "SKIP: claude already running in this pane"))
+            continue
+        cmd = "claude --resume %s" % sid
+        if p.get("resume_flags"):
+            cmd += " " + " ".join(p["resume_flags"])
+        plan.append((p, cmd, "inject"))
+
+    print("Restore plan (%d claude pane(s)):\n" % len(snap["panes"]))
+    inject = []
+    for p, cmd, note in plan:
+        tag = "%s/%s" % (p.get("workspace_name") or "?", p["pane_uuid"][:8])
+        if cmd:
+            print("  [inject] %-16s %-6s %s" % (tag, p.get("pane_role"), cmd))
+            inject.append((p, cmd))
+        else:
+            print("  [ skip ] %-16s %-6s %s" % (tag, p.get("pane_role"), note))
+
+    if args.dry_run:
+        print("\n--dry-run: nothing typed.")
+        return 0
+    if not inject:
+        print("\nnothing to inject.")
+        return 0
+    if not args.yes:
+        try:
+            ans = input("\nInject %d resume command(s)? [y/N] " % len(inject))
+        except EOFError:
+            ans = ""
+        if ans.strip().lower() not in ("y", "yes"):
+            print("aborted.")
+            return 0
+
+    for p, cmd in inject:
+        typ = ["agtermctl", "session", "type", cmd + "\n",
+               "--target", p["pane_uuid"]]
+        if (p.get("pane_role") or "left") == "right":
+            typ += ["--pane", "right"]
+        try:
+            subprocess.run(typ, timeout=15)
+        except Exception as e:
+            print("  failed on %s: %s" % (p["pane_uuid"][:8], e))
+    print("done: injected %d." % len(inject))
+    return 0
+
+
+# ------------------------------------------------------------------------------ main
+
+def main():
+    ap = argparse.ArgumentParser(prog="agterm-backup")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    pi = sub.add_parser("install", help="wire the capture hook + create state dirs")
+    pi.add_argument("--python", help="python interpreter for the hook (default /usr/bin/python3)")
+    pi.set_defaults(func=cmd_install)
+
+    ps = sub.add_parser("status", help="show capture coverage for running claude panes")
+    ps.set_defaults(func=cmd_status)
+
+    pn = sub.add_parser("snap", help="write a snapshot (claude ids + topology)")
+    pn.add_argument("--harvest", action="store_true",
+                    help="also try to read ids from /status scrollback for uncaptured panes")
+    pn.set_defaults(func=cmd_snap)
+
+    pr = sub.add_parser("restore", help="type 'claude --resume <id>' into restored panes")
+    pr.add_argument("--dry-run", action="store_true")
+    pr.add_argument("--yes", action="store_true")
+    pr.add_argument("--from-live", action="store_true",
+                    help="use live/ + current tree instead of the saved snapshot")
+    pr.set_defaults(func=cmd_restore)
+
+    args = ap.parse_args()
+    sys.exit(args.func(args))
+
+
+if __name__ == "__main__":
+    main()

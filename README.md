@@ -83,6 +83,50 @@ npx skills add https://github.com/isachivka/beware-of-skills --skill agent-pm
 > *You:* Ты менеджер по делам document-restoration. Ты ничего не делаешь руками — только даёшь инструкции агентам через agterm и проверяешь их работу.
 > *Claude:* *(maps the sessions, asks who is who, and starts running the show)*
 
+### agterm-backup
+
+Reboot your Mac (for a macOS or [agterm](https://github.com/umputun/agterm) update) **without losing your running Claude Code sessions** — every one comes back **resumed** (`claude --resume <id>`) in its original pane.
+
+agterm already rebuilds the session tree on restart, but it re-runs `claude` *fresh*. This skill closes that gap: a Claude Code hook records each pane's live session id, and after a restart it types `claude --resume <id>` into each restored shell.
+
+**Install:**
+
+```bash
+npx skills add https://github.com/isachivka/beware-of-skills --skill agterm-backup
+```
+
+Then wire the capture hook (once):
+
+```bash
+python3 ~/.claude/skills/agterm-backup/agterm-backup install
+```
+
+**Paths:**
+- Skill files: `~/.claude/skills/agterm-backup/` — `agterm-backup` (CLI), `capture.py` (the hook), `SKILL.md`.
+- Hook: `install` adds `capture.py` to `SessionStart` / `UserPromptSubmit` / `PreToolUse` / `Stop` in `~/.claude/settings.json` (it backs the file up to `settings.json.agterm-backup.bak` first and merges — your existing hooks are preserved).
+- State: `~/.agterm-backup/` — `live/<pane>-<role>.json` (per-pane hook captures), `snapshots/` (timestamped backups), `snapshot.json` (latest).
+
+**How it works:**
+- Every pane's `AGTERM_SESSION_ID` is stable across a restart (agterm restores the tree keyed by persisted UUIDs), so it's the join key.
+- A running claude session's id isn't readable from outside — the hook receives the exact `session_id` on stdin and maps it to the pane. Claude Code re-reads hooks per event, so a freshly-installed hook even captures already-running sessions on their next activity.
+- One-shot bonus: `snap --harvest` reads a `Session ID:` line from a pane's `/status` scrollback (validated against a real transcript) to capture sessions that were running before the hook existed.
+
+**Reboot workflow:**
+
+```bash
+agterm-backup status            # who's captured
+agterm-backup snap --harvest    # freeze the map (before reboot)
+# ...reboot / update agterm...
+agterm-backup restore --dry-run # review
+agterm-backup restore           # type `claude --resume <id>` into each restored pane
+```
+
+`restore` skips panes that aren't present or already have claude running, so it's safe to run twice. Preserved flags (e.g. `--dangerously-skip-permissions`) are re-applied on resume.
+
+**Requires:** [agterm](https://github.com/umputun/agterm) (`agtermctl` on PATH) and Claude Code. macOS.
+
+**Triggers:** `agterm-backup`, "reboot without losing sessions", "resume claude after restart", "capture running claude sessions".
+
 ## Contributing
 
 Got a skill idea that's equally unhinged? PRs welcome.
