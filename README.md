@@ -127,6 +127,27 @@ agterm-backup restore           # type `claude --resume <id>` into each restored
 
 **Triggers:** `agterm-backup`, "reboot without losing sessions", "resume claude after restart", "capture running claude sessions".
 
+### ozon-orders
+
+Gives Claude read access to a self-hosted **Ozon Orders History** service — a personal API over one's [Ozon](https://ozon.ru) purchase history. Ask about past orders, search items by title, check order status (delivered / in progress / cancelled), find returned items, or get spending statistics — and Claude queries the API and answers.
+
+**Install:**
+
+```bash
+npx skills add https://github.com/isachivka/beware-of-skills --skill ozon-orders
+```
+
+**Setup:** the service must be reachable on your network. Default base URL is `http://192.168.1.10:3027`; override with the `OZON_HISTORY_BASE` env var.
+
+**What it exposes** (the whole API): `GET /api/items` (cursor-paginated orders, `q` search, max 200/page), `GET /api/stats` (spending buckets by `year`/`month`/`week` + range totals and returned amount), `GET /api/images/<file>`, `GET /api/health`. A bundled `ozon.py` helper handles pagination and client-side filtering.
+
+```bash
+python3 ~/.claude/skills/ozon-orders/ozon.py stats --granularity year
+python3 ~/.claude/skills/ozon-orders/ozon.py items --q "нори" --all --count
+```
+
+**Triggers:** "ozon orders", "ozon history", "сколько я потратил на озоне", "что заказывали на Озоне", "возвраты", or any question about this person's Ozon purchases.
+
 ## Contributing
 
 Got a skill idea that's equally unhinged? PRs welcome.
