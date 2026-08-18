@@ -170,6 +170,33 @@ works if you can get line-numbered notes back.
 **Triggers:** "memory review", "почисти память", "review my memories", "prune memory",
 "audit memory", memories look stale or contradict the code.
 
+### vpn-to
+
+Switches which uplink the home router's xkeen/xray tunnel dials the VPS over, and reports
+which one it is on now. `/vpn-to nw`, `/vpn-to rt`, or no argument for status.
+
+Very specific to one Keenetic router with two ISPs, but the mechanism generalises: on
+KeeneticOS the provider checkboxes in a connection policy decide which *clients* get
+redirected into xkeen — they do nothing for xray's own outbound socket. xkeen deliberately
+excludes xray from its OUTPUT chain by gid, so without a mark the tunnel leaves over the
+default route no matter what the web interface says. The uplink is chosen by
+`streamSettings.sockopt.mark`, which lands in an `ip rule` and picks the policy's routing
+table.
+
+**Install:**
+
+```bash
+npx skills add https://github.com/isachivka/beware-of-skills --skill vpn-to
+```
+
+Reads the policy codes off the router instead of hardcoding them, keeps the edit strictly
+one-directional (local repo → commit → push → pull → `run.sh`, never an edit on the router,
+which the deploy script would clobber anyway), validates the JSON survives xray's comment
+stripping before writing, and refuses to restart the tunnel when nothing changed.
+
+**Triggers:** `/vpn-to rt`, `/vpn-to nw`, "переключи впн на ростелеком", "через какой
+провайдер сейчас впн", VPN slow because one provider's route degraded.
+
 ## Contributing
 
 Got a skill idea that's equally unhinged? PRs welcome.
