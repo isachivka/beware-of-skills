@@ -148,6 +148,28 @@ python3 ~/.claude/skills/ozon-orders/ozon.py items --q "нори" --all --count
 
 **Triggers:** "ozon orders", "ozon history", "сколько я потратил на озоне", "что заказывали на Озоне", "возвраты", or any question about this person's Ozon purchases.
 
+### memory-review
+
+Turns an agent memory directory into one reviewable document, collects a verdict on every
+entry from you, and applies them safely.
+
+Memory rots quietly. A fact is written once, stays true for a month, then keeps being read
+for a year — nothing fails, the agent just acts on something that stopped being true. This
+walks the whole pile in one sitting: assemble every memory into a single annotatable file
+(optionally translated for faster reading), collect your verdicts through
+[revdiff](https://github.com/umputun/revdiff), verify the conditional ones against the
+actual code before acting, then delete, keep, tag or move — and repair the index and the
+wiki-links that deleting just broke.
+
+Snapshots into version control before it deletes anything, and checks that the snapshot
+really landed rather than assuming your home directory is versioned.
+
+**Requires:** Claude Code. The review step assumes the `revdiff` skill; any annotation tool
+works if you can get line-numbered notes back.
+
+**Triggers:** "memory review", "почисти память", "review my memories", "prune memory",
+"audit memory", memories look stale or contradict the code.
+
 ## Contributing
 
 Got a skill idea that's equally unhinged? PRs welcome.
