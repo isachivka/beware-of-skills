@@ -2,10 +2,16 @@
   "name": "bosp",
   "displayName": "beware-of-skills: personal",
   "description": "Skills wired to Igor's own hardware and accounts — useful to exactly one person.",
-  "version": "1.0.0",
-  "author": { "name": "Igor Sachivka", "url": "https://github.com/isachivka" },
+  "author": {
+    "name": "Igor Sachivka",
+    "url": "https://github.com/isachivka"
+  },
   "homepage": "https://github.com/isachivka/beware-of-skills",
   "repository": "https://github.com/isachivka/beware-of-skills",
   "license": "MIT",
-  "keywords": ["skills", "homelab", "personal"]
+  "keywords": [
+    "skills",
+    "homelab",
+    "personal"
+  ]
 }
