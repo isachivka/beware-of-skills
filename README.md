@@ -197,6 +197,31 @@ stripping before writing, and refuses to restart the tunnel when nothing changed
 **Triggers:** `/vpn-to rt`, `/vpn-to nw`, "переключи впн на ростелеком", "через какой
 провайдер сейчас впн", VPN slow because one provider's route degraded.
 
+### revdiff-ru
+
+A wrapper over `/revdiff:revdiff` for people who would rather read the review in Russian.
+Translates everything that isn't code — comments, docstrings, markdown prose, commit and PR
+text — then opens the normal revdiff TUI on the translated copy.
+
+**Install:**
+
+```bash
+npx skills add https://github.com/isachivka/beware-of-skills --skill revdiff-ru
+```
+
+The hard part is line numbering: the translated copy has to be line-for-line congruent with
+the original — same total line count, no wrapping of long Russian sentences — so an annotation on `file:line` still points at the real line in the working tree.
+Translation happens in subagents (the raw text never enters the main context) and lands in `/tmp`,
+which revdiff opens via `--only`; the working tree is never touched, and fixes go to the originals.
+
+Not `--stdin`: the revdiff launcher starts the TUI in a terminal overlay that doesn't inherit
+stdin, so a piped patch dies with `--stdin requires piped or redirected input`.
+
+String literals stay in English on purpose — they're code, and translating them changes behavior.
+
+**Triggers:** `/revdiff-ru`, "ревью на русском", "revdiff по-русски", "переведи диф и открой
+revdiff".
+
 ## Contributing
 
 Got a skill idea that's equally unhinged? PRs welcome.
