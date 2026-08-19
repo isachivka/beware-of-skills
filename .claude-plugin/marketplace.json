@@ -1,0 +1,15 @@
+{
+  "name": "beware-of-skills",
+  "description": "Igor Sachivka's grab-bag of Claude Code skills.",
+  "owner": {
+    "name": "Igor Sachivka",
+    "url": "https://github.com/isachivka"
+  },
+  "plugins": [
+    {
+      "name": "beware-of-skills",
+      "source": "./",
+      "description": "Browser-flow recording, agterm session backup, an agent PM, Ozon order history, memory review, a router VPN switch, and Russian diff review."
+    }
+  ]
+}

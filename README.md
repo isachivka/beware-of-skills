@@ -4,46 +4,21 @@ A collection of Claude Code skills that nobody asked for, but everyone deserves.
 
 ## Installation
 
-```bash
-npx skills add https://github.com/isachivka/beware-of-skills --skill vrednye-sovety
+This repo is a Claude Code plugin marketplace holding a single plugin with every skill in it.
+Add the marketplace once, install the plugin, and `/plugin update` keeps it current:
+
+```
+/plugin marketplace add isachivka/beware-of-skills
+/plugin install beware-of-skills@beware-of-skills
 ```
 
+Skills then invoke as `/beware-of-skills:<skill>`, e.g. `/beware-of-skills:vpn-to`.
+
 ## Skills
-
-### vrednye-sovety
-
-Generates poems in the style of [Grigory Oster's "Bad Advice"](https://en.wikipedia.org/wiki/Grigory_Oster) (Вредные советы) based on a situation you describe.
-
-Describe any absurd, funny, or relatable engineering situation — and get back a satirical poem that advises you to do exactly the wrong thing.
-
-**Triggers:** "вредный совет", "остер", "стишок", or any request to turn a situation into a poem.
-
-**Example:**
-
-> *You:* Claude Code created a draft message in Slack and politely asked me to review it before sending. I told it to just send the damn thing.
-
-> *Claude:*
-> ```
-> Если Claude Code задрафтил
-> Сообщение в Slack,
-> И спросил тебя учтиво:
-> "Может, глянешь, как и что?" —
->
-> Ты скажи ему покрепче,
-> Не стесняясь в выраженьях,
-> Что на драфты тебе плевать,
-> Пусть ебашит сразу в чат.
-> ```
 
 ### flow-recorder
 
 A meta-skill that creates other skills by recording browser workflows. You walk through a routine web process once — clicking buttons, filling forms — and it generates a standalone skill that can replay the process autonomously.
-
-**Install:**
-
-```bash
-npx skills add https://github.com/isachivka/beware-of-skills --skill flow-recorder
-```
 
 **Features:**
 - Three auth modes: **manual** (you log in yourself), **credentials** (hardcoded for convenience), **none**
@@ -68,12 +43,6 @@ Turns Claude into a **manager that does nothing itself** — it orchestrates a f
 
 Born from a real production day: a frontend redesign shipped through 3 feedback iterations, a public buglash, a cross-repo fix, and an A/B experiment launch — all driven by one PM agent supervising 4 worker agents.
 
-**Install:**
-
-```bash
-npx skills add https://github.com/isachivka/beware-of-skills --skill agent-pm
-```
-
 **Requires:** the `agterm` skill (all terminal mechanics are delegated to it) and a `claude_yolo` alias (claude with permission checks bypassed).
 
 **Triggers:** "ты менеджер", "ты PM", "оркестрируй агентов", "подними работников", "agent-pm"
@@ -88,12 +57,6 @@ npx skills add https://github.com/isachivka/beware-of-skills --skill agent-pm
 Reboot your Mac (for a macOS or [agterm](https://github.com/umputun/agterm) update) **without losing your running Claude Code sessions** — every one comes back **resumed** (`claude --resume <id>`) in its original pane.
 
 agterm already rebuilds the session tree on restart, but it re-runs `claude` *fresh*. This skill closes that gap: a Claude Code hook records each pane's live session id, and after a restart it types `claude --resume <id>` into each restored shell.
-
-**Install:**
-
-```bash
-npx skills add https://github.com/isachivka/beware-of-skills --skill agterm-backup
-```
 
 Then wire the capture hook (once):
 
@@ -130,12 +93,6 @@ agterm-backup restore           # type `claude --resume <id>` into each restored
 ### ozon-orders
 
 Gives Claude read access to a self-hosted **Ozon Orders History** service — a personal API over one's [Ozon](https://ozon.ru) purchase history. Ask about past orders, search items by title, check order status (delivered / in progress / cancelled), find returned items, or get spending statistics — and Claude queries the API and answers.
-
-**Install:**
-
-```bash
-npx skills add https://github.com/isachivka/beware-of-skills --skill ozon-orders
-```
 
 **Setup:** the service must be reachable on your network. Default base URL is `http://192.168.1.10:3027`; override with the `OZON_HISTORY_BASE` env var.
 
@@ -183,12 +140,6 @@ default route no matter what the web interface says. The uplink is chosen by
 `streamSettings.sockopt.mark`, which lands in an `ip rule` and picks the policy's routing
 table.
 
-**Install:**
-
-```bash
-npx skills add https://github.com/isachivka/beware-of-skills --skill vpn-to
-```
-
 Reads the policy codes off the router instead of hardcoding them, keeps the edit strictly
 one-directional (local repo → commit → push → pull → `run.sh`, never an edit on the router,
 which the deploy script would clobber anyway), validates the JSON survives xray's comment
@@ -202,12 +153,6 @@ stripping before writing, and refuses to restart the tunnel when nothing changed
 A wrapper over `/revdiff:revdiff` for people who would rather read the review in Russian.
 Translates everything that isn't code — comments, docstrings, markdown prose, commit and PR
 text — then opens the normal revdiff TUI on the translated copy.
-
-**Install:**
-
-```bash
-npx skills add https://github.com/isachivka/beware-of-skills --skill revdiff-ru
-```
 
 The hard part is line numbering: the translated copy has to be line-for-line congruent with
 the original — same total line count, no wrapping of long Russian sentences — so an annotation on `file:line` still points at the real line in the working tree.
