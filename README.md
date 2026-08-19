@@ -4,17 +4,17 @@ A collection of Claude Code skills that nobody asked for, but everyone deserves.
 
 ## Installation
 
-This repo is a Claude Code plugin marketplace holding a single plugin with every skill in it.
-Add the marketplace once, install the plugin, and `/plugin update` keeps it current:
+This repo is a Claude Code plugin marketplace with two plugins: **bos** (the general set) and
+**bosp** (skills wired to my own hardware and accounts — you almost certainly want to skip it).
 
 ```
 /plugin marketplace add isachivka/beware-of-skills
-/plugin install beware-of-skills@beware-of-skills
+/plugin install bos@beware-of-skills
 ```
 
-Skills then invoke as `/beware-of-skills:<skill>`, e.g. `/beware-of-skills:vpn-to`.
+Skills then invoke as `/bos:<skill>`, e.g. `/bos:agent-pm`. `/plugin update` keeps them current.
 
-## Skills
+## Skills — `bos`
 
 ### flow-recorder
 
@@ -90,21 +90,6 @@ agterm-backup restore           # type `claude --resume <id>` into each restored
 
 **Triggers:** `agterm-backup`, "reboot without losing sessions", "resume claude after restart", "capture running claude sessions".
 
-### ozon-orders
-
-Gives Claude read access to a self-hosted **Ozon Orders History** service — a personal API over one's [Ozon](https://ozon.ru) purchase history. Ask about past orders, search items by title, check order status (delivered / in progress / cancelled), find returned items, or get spending statistics — and Claude queries the API and answers.
-
-**Setup:** the service must be reachable on your network. Default base URL is `http://192.168.1.10:3027`; override with the `OZON_HISTORY_BASE` env var.
-
-**What it exposes** (the whole API): `GET /api/items` (cursor-paginated orders, `q` search, max 200/page), `GET /api/stats` (spending buckets by `year`/`month`/`week` + range totals and returned amount), `GET /api/images/<file>`, `GET /api/health`. A bundled `ozon.py` helper handles pagination and client-side filtering.
-
-```bash
-python3 ~/.claude/skills/ozon-orders/ozon.py stats --granularity year
-python3 ~/.claude/skills/ozon-orders/ozon.py items --q "нори" --all --count
-```
-
-**Triggers:** "ozon orders", "ozon history", "сколько я потратил на озоне", "что заказывали на Озоне", "возвраты", or any question about this person's Ozon purchases.
-
 ### memory-review
 
 Turns an agent memory directory into one reviewable document, collects a verdict on every
@@ -127,6 +112,44 @@ works if you can get line-numbered notes back.
 **Triggers:** "memory review", "почисти память", "review my memories", "prune memory",
 "audit memory", memories look stale or contradict the code.
 
+### revdiff-ru
+
+A wrapper over `/revdiff:revdiff` for people who would rather read the review in Russian.
+Translates everything that isn't code — comments, docstrings, markdown prose, commit and PR
+text — then opens the normal revdiff TUI on the translated copy.
+
+The hard part is line numbering: the translated copy has to be line-for-line congruent with
+the original — same total line count, no wrapping of long Russian sentences — so an annotation on `file:line` still points at the real line in the working tree.
+Translation happens in subagents (the raw text never enters the main context) and lands in `/tmp`,
+which revdiff opens via `--only`; the working tree is never touched, and fixes go to the originals.
+
+Not `--stdin`: the revdiff launcher starts the TUI in a terminal overlay that doesn't inherit
+stdin, so a piped patch dies with `--stdin requires piped or redirected input`.
+
+String literals stay in English on purpose — they're code, and translating them changes behavior.
+
+**Triggers:** `/revdiff-ru`, "ревью на русском", "revdiff по-русски", "переведи диф и открой
+revdiff".
+
+## Skills — `bosp` (personal)
+
+Wired to my home router and my Ozon account. Install with `/plugin install bosp@beware-of-skills` if you really want them.
+
+### ozon-orders
+
+Gives Claude read access to a self-hosted **Ozon Orders History** service — a personal API over one's [Ozon](https://ozon.ru) purchase history. Ask about past orders, search items by title, check order status (delivered / in progress / cancelled), find returned items, or get spending statistics — and Claude queries the API and answers.
+
+**Setup:** the service must be reachable on your network. Default base URL is `http://192.168.1.10:3027`; override with the `OZON_HISTORY_BASE` env var.
+
+**What it exposes** (the whole API): `GET /api/items` (cursor-paginated orders, `q` search, max 200/page), `GET /api/stats` (spending buckets by `year`/`month`/`week` + range totals and returned amount), `GET /api/images/<file>`, `GET /api/health`. A bundled `ozon.py` helper handles pagination and client-side filtering.
+
+```bash
+python3 ~/.claude/skills/ozon-orders/ozon.py stats --granularity year
+python3 ~/.claude/skills/ozon-orders/ozon.py items --q "нори" --all --count
+```
+
+**Triggers:** "ozon orders", "ozon history", "сколько я потратил на озоне", "что заказывали на Озоне", "возвраты", or any question about this person's Ozon purchases.
+
 ### vpn-to
 
 Switches which uplink the home router's xkeen/xray tunnel dials the VPS over, and reports
@@ -147,25 +170,6 @@ stripping before writing, and refuses to restart the tunnel when nothing changed
 
 **Triggers:** `/vpn-to rt`, `/vpn-to nw`, "переключи впн на ростелеком", "через какой
 провайдер сейчас впн", VPN slow because one provider's route degraded.
-
-### revdiff-ru
-
-A wrapper over `/revdiff:revdiff` for people who would rather read the review in Russian.
-Translates everything that isn't code — comments, docstrings, markdown prose, commit and PR
-text — then opens the normal revdiff TUI on the translated copy.
-
-The hard part is line numbering: the translated copy has to be line-for-line congruent with
-the original — same total line count, no wrapping of long Russian sentences — so an annotation on `file:line` still points at the real line in the working tree.
-Translation happens in subagents (the raw text never enters the main context) and lands in `/tmp`,
-which revdiff opens via `--only`; the working tree is never touched, and fixes go to the originals.
-
-Not `--stdin`: the revdiff launcher starts the TUI in a terminal overlay that doesn't inherit
-stdin, so a piped patch dies with `--stdin requires piped or redirected input`.
-
-String literals stay in English on purpose — they're code, and translating them changes behavior.
-
-**Triggers:** `/revdiff-ru`, "ревью на русском", "revdiff по-русски", "переведи диф и открой
-revdiff".
 
 ## Contributing
 
