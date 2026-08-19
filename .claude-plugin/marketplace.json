@@ -5,16 +5,15 @@
     "name": "Igor Sachivka",
     "url": "https://github.com/isachivka"
   },
-  "metadata": { "pluginRoot": "./plugins" },
   "plugins": [
     {
       "name": "bos",
-      "source": "./bos",
+      "source": "./plugins/bos",
       "description": "Browser-flow recording, agterm session backup, an agent PM, memory review, and Russian diff review."
     },
     {
       "name": "bosp",
-      "source": "./bosp",
+      "source": "./plugins/bosp",
       "description": "Personal: home-router VPN uplink switching and Ozon order history."
     }
   ]
