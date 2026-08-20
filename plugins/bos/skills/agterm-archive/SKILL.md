@@ -22,7 +22,16 @@ agterm-archive archive [workspace]   # snapshot + close (default: active workspa
 agterm-archive list                  # what is parked
 agterm-archive restore <name>        # recreate it, resume the claudes
 agterm-archive drop <name>           # forget an archive
+agterm-archive install               # add the palette entries (ctrl+a>a / ctrl+a>r)
+agterm-archive uninstall             # remove them
 ```
+
+`install` writes `~/.local/bin/agterm-archive` and a managed block in
+`~/.config/agterm/keymap.conf` with two custom commands: **Archive workspace**
+(`ctrl+a>a`, archives the workspace the cursor is in, passing `$AGT_WORKSPACE_ID`) and
+**Restore workspace** (`ctrl+a>r`, lists archives in agterm's native fuzzy picker and
+restores the pick). The wrapper resolves the newest installed copy of the skill at call
+time, because the plugin cache path carries a commit sha.
 
 Archives live in `~/.agterm-backup/archives/<name>.json`.
 

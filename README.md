@@ -164,7 +164,11 @@ off.
 agterm-archive archive beware-of-skills
 agterm-archive list
 agterm-archive restore beware-of-skills
+agterm-archive install       # palette: "Archive workspace" (ctrl+a>a), "Restore workspace" (ctrl+a>r)
 ```
+
+The restore entry lists your archives in agterm's native fuzzy picker, so parking and
+un-parking a project never needs a Claude session at all.
 
 For projects that are done for now but not done for good, and shouldn't sit in your sidebar
 in the meantime. Complements `agterm-backup` rather than overlapping it: backup covers what
