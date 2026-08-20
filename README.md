@@ -133,17 +133,45 @@ revdiff".
 
 ### agterm-fork
 
-Forks the current Claude Code session into a new agterm session in the same workspace. The
-fork resumes the whole conversation under a fresh session id (`claude --resume <id>
---fork-session`), keeps the flags this session was launched with, and waits at its prompt —
-you walk over and type what it should do. The original session is untouched.
+Forks the claude running in an agterm pane into a sibling session: same workspace, same
+launch flags, the whole conversation resumed under a fresh session id
+(`claude --resume <id> --fork-session`). The fork waits at its prompt — you open it and say
+what it should do — and the original session carries on untouched.
+
+```bash
+agterm-fork                # fork the current pane
+agterm-fork install        # add "Fork session" to agterm's command palette (ctrl+a>f)
+```
+
+`install` writes a wrapper to `~/.local/bin` and a managed block in `keymap.conf`, so you
+can fork whatever session the cursor is on without going through Claude at all. The wrapper
+resolves the newest installed copy of the skill at call time — plugin cache paths carry a
+commit sha and would otherwise break on every update.
 
 Works only inside agterm, and only alongside `agterm-backup`: a session cannot know its own
-claude id, so it is read from the live record that skill's hook writes. Launch flags are
-recovered by walking up the process tree to the `claude` process.
+claude id, so it is read from the live record that skill's hook writes.
 
-**Triggers:** `/bos:agterm-fork`, "форкни сессию", "fork this session", "продолжи это в
-соседней вкладке".
+**Triggers:** `/bos:agterm-fork`, "форкни сессию", "fork this session".
+
+### agterm-archive
+
+Parks a whole workspace on disk. Snapshots every session — order, names, cwds, splits with
+their ratios, and each pane's claude session id and launch flags — then closes the
+workspace. Later, `restore` recreates the whole thing and resumes every claude where it left
+off.
+
+```bash
+agterm-archive archive beware-of-skills
+agterm-archive list
+agterm-archive restore beware-of-skills
+```
+
+For projects that are done for now but not done for good, and shouldn't sit in your sidebar
+in the meantime. Complements `agterm-backup` rather than overlapping it: backup covers what
+is open across a restart, archive covers what you deliberately closed. Non-claude panes come
+back as shells in the right directory — a snapshot is not a checkpoint.
+
+**Triggers:** `/bos:agterm-archive`, "заархивируй воркспейс", "верни воркспейс из архива".
 
 ## Skills — `bosp` (personal)
 

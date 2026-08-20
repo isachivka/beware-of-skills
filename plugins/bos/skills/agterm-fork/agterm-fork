@@ -159,8 +159,9 @@ def cmd_install(args):
         )
     os.chmod(WRAPPER, 0o755)
 
-    block = "%s\ncommand \"Fork session\"  %s \"$AGT_SESSION_ID\" \"$AGT_PANE\"\n%s\n" % (
-        BEGIN, WRAPPER.replace(HOME, "$HOME"), END)
+    chord = "" if args.no_chord else (args.chord or "ctrl+a>f") + " "
+    block = "%s\ncommand \"Fork session\" %s%s \"$AGT_SESSION_ID\" \"$AGT_PANE\"\n%s\n" % (
+        BEGIN, chord, WRAPPER.replace(HOME, "$HOME"), END)
     try:
         with open(KEYMAP) as fh:
             conf = fh.read()
@@ -178,7 +179,8 @@ def cmd_install(args):
     agtermctl("keymap", "reload")
     print("wrapper:  %s" % WRAPPER)
     print("keymap:   %s  (block updated, keymap reloaded)" % KEYMAP)
-    print('palette:  Ctrl-Shift-O -> "Fork session" forks the session under the cursor')
+    print('palette:  Ctrl-Shift-O -> "Fork session"%s' %
+          ("" if args.no_chord else "   (chord: %s)" % (args.chord or "ctrl+a>f")))
     return 0
 
 
@@ -214,6 +216,8 @@ def main():
     f.set_defaults(fn=cmd_fork)
 
     i = sub.add_parser("install", help='wire the "Fork session" custom command')
+    i.add_argument("--chord", help="key chord for the palette entry (default: ctrl+a>f)")
+    i.add_argument("--no-chord", action="store_true", help="palette-only, no key binding")
     i.set_defaults(fn=cmd_install)
 
     u = sub.add_parser("uninstall", help="remove the custom command and wrapper")

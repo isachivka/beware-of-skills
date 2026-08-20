@@ -1,0 +1,275 @@
+#!/usr/bin/env python3
+"""agterm-archive — park a whole agterm workspace on disk and bring it back later.
+
+`archive` writes the workspace's shape (sessions, order, names, cwds, splits) plus each
+pane's claude session id and launch flags, then closes the workspace. `restore` recreates
+it and resumes every claude where it left off.
+
+Session ids come from the agterm-backup capture hook; this tool is a separate concern from
+`agterm-backup restore`, which only ever deals with what is currently open.
+"""
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+HOME = os.path.expanduser("~")
+STATE_DIR = os.path.join(HOME, ".agterm-backup")
+LIVE_DIR = os.path.join(STATE_DIR, "live")
+ARCHIVE_DIR = os.path.join(STATE_DIR, "archives")
+
+
+def die(msg, code=1):
+    print(msg, file=sys.stderr)
+    raise SystemExit(code)
+
+
+def agtermctl(*args, check=True):
+    try:
+        out = subprocess.run(["agtermctl", *args], capture_output=True,
+                             text=True, timeout=20)
+    except Exception as exc:
+        die("agtermctl failed: %s" % exc)
+    if check and out.returncode != 0:
+        die("agtermctl %s failed: %s" % (" ".join(args), out.stderr.strip()))
+    try:
+        return json.loads(out.stdout)
+    except Exception:
+        return out.stdout
+
+
+def load_tree():
+    d = agtermctl("tree", "--json")
+    return d.get("result", {}).get("tree", {}) if isinstance(d, dict) else {}
+
+
+def slug(name):
+    return re.sub(r"[^a-zA-Z0-9._-]", "-", name).strip("-") or "workspace"
+
+
+def strip_resume(argv):
+    out, skip = [], False
+    for a in argv[1:]:
+        if skip:
+            skip = False
+            continue
+        if a in ("--resume", "-r"):
+            skip = True
+            continue
+        if a in ("--continue", "-c", "--fork-session"):
+            continue
+        out.append(a)
+    return out
+
+
+def resume_id(argv):
+    for i, a in enumerate(argv):
+        if a in ("--resume", "-r") and i + 1 < len(argv):
+            return argv[i + 1]
+    return None
+
+
+def live_id(pane_id, role):
+    try:
+        with open(os.path.join(LIVE_DIR, "%s-%s.json" % (pane_id.upper(), role))) as fh:
+            return json.load(fh).get("claude_session_id")
+    except Exception:
+        return None
+
+
+def pane_record(pane_id, role, argv, cwd):
+    is_claude = bool(argv) and os.path.basename(argv[0]) == "claude"
+    return {
+        "role": role,
+        "cwd": cwd,
+        "is_claude": is_claude,
+        "claude_session_id": (live_id(pane_id, role) or resume_id(argv)) if is_claude else None,
+        "flags": strip_resume(argv) if is_claude else [],
+    }
+
+
+def find_workspace(tree, ref):
+    for ws in tree.get("workspaces", []):
+        if ref is None and ws.get("active"):
+            return ws
+        if ref and (ws.get("name") == ref or (ws.get("id") or "").upper().startswith(ref.upper())):
+            return ws
+    return None
+
+
+def archive_path(name):
+    return os.path.join(ARCHIVE_DIR, slug(name) + ".json")
+
+
+# --------------------------------------------------------------------------- commands
+
+def cmd_archive(args):
+    tree = load_tree()
+    ws = find_workspace(tree, args.workspace)
+    if not ws:
+        die("workspace %r not found" % (args.workspace or "active"))
+    if not args.keep and (ws.get("id") or "").upper() == (os.environ.get("AGTERM_WORKSPACE_ID") or "").upper():
+        die("that is the workspace you are running in — closing it would kill this session.\n"
+            "Run it from elsewhere, or pass --keep to snapshot without closing.")
+
+    sessions = []
+    for s in ws.get("sessions", []):
+        pid = (s.get("id") or "").upper()
+        rec = {
+            "name": s.get("name"),
+            "title": s.get("title"),
+            "cwd": s.get("cwd") or HOME,
+            "flagged": bool(s.get("flagged")),
+            "split": bool(s.get("split")),
+            "split_axis": s.get("splitAxis") or "vertical",
+            "split_ratio": s.get("splitRatio"),
+            "panes": [pane_record(pid, "left", s.get("foreground") or [], s.get("cwd") or HOME)],
+        }
+        if s.get("split"):
+            rec["panes"].append(pane_record(pid, "right", s.get("splitForeground") or [],
+                                            s.get("splitCwd") or s.get("cwd") or HOME))
+        sessions.append(rec)
+
+    snap = {
+        "workspace": ws.get("name"),
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "sessions": sessions,
+    }
+    os.makedirs(ARCHIVE_DIR, exist_ok=True)
+    path = archive_path(ws.get("name") or "workspace")
+    if os.path.exists(path) and not args.force:
+        die("%s already archived (%s) — pass --force to overwrite" % (ws.get("name"), path))
+    with open(path, "w") as fh:
+        json.dump(snap, fh, indent=1)
+
+    claudes = sum(1 for s in sessions for p in s["panes"] if p["claude_session_id"])
+    missing = sum(1 for s in sessions for p in s["panes"] if p["is_claude"] and not p["claude_session_id"])
+    print("archived %r: %d session(s), %d claude(s) resumable" %
+          (ws.get("name"), len(sessions), claudes))
+    if missing:
+        print("  WARNING: %d claude pane(s) had no captured id and will come back as a "
+              "plain shell (agterm-backup hook not installed, or that session never acted)"
+              % missing)
+    print("  file: %s" % path)
+
+    if args.keep:
+        print("  --keep: workspace left open")
+        return 0
+    agtermctl("workspace", "delete", "--target", ws.get("id"))
+    print("  workspace closed. Bring it back with: agterm-archive restore %r" % ws.get("name"))
+    return 0
+
+
+def cmd_list(args):
+    if not os.path.isdir(ARCHIVE_DIR):
+        print("no archives yet")
+        return 0
+    rows = []
+    for fn in sorted(os.listdir(ARCHIVE_DIR)):
+        if not fn.endswith(".json"):
+            continue
+        with open(os.path.join(ARCHIVE_DIR, fn)) as fh:
+            d = json.load(fh)
+        claudes = sum(1 for s in d["sessions"] for p in s["panes"] if p.get("claude_session_id"))
+        rows.append((d.get("workspace") or fn[:-5], d.get("ts", "?"), len(d["sessions"]), claudes))
+    if not rows:
+        print("no archives yet")
+        return 0
+    print("%-28s %-22s %8s %8s" % ("WORKSPACE", "ARCHIVED", "SESSIONS", "CLAUDES"))
+    for name, ts, n, c in rows:
+        print("%-28s %-22s %8d %8d" % (name, ts, n, c))
+    return 0
+
+
+def cmd_restore(args):
+    path = archive_path(args.name)
+    if not os.path.exists(path):
+        die("no archive named %r (see 'agterm-archive list')" % args.name)
+    with open(path) as fh:
+        snap = json.load(fh)
+    wsname = snap.get("workspace") or args.name
+
+    if find_workspace(load_tree(), wsname) and not args.force:
+        die("workspace %r is already open — close it first, or pass --force to add the "
+            "sessions to it" % wsname)
+
+    print("restoring %r: %d session(s)%s" %
+          (wsname, len(snap["sessions"]), "" if not args.no_boot else " (--no-boot)"))
+    for s in snap["sessions"]:
+        created = agtermctl("session", "new", "--workspace-name", wsname,
+                            "--create-workspace", "--cwd", s["cwd"],
+                            "--name", s.get("name") or "", "--no-select", "--json")
+        sid = created.get("result", {}).get("id")
+        if not sid:
+            print("  FAILED to create %r" % s.get("name"))
+            continue
+        print("  + %s" % (s.get("name") or sid[:8]))
+
+        if s.get("split"):
+            agtermctl("session", "split", "visibility", "on",
+                      "--axis", s.get("split_axis") or "vertical", "--target", sid)
+            if s.get("split_ratio"):
+                agtermctl("session", "resize", "--split-ratio",
+                          "%.3f" % float(s["split_ratio"]), "--target", sid)
+
+        for p in s["panes"]:
+            if args.no_boot or not p.get("claude_session_id"):
+                continue
+            cmd = " ".join(["claude", "--resume", p["claude_session_id"], *p.get("flags", [])])
+            if p["role"] == "right" and p.get("cwd") and p["cwd"] != s["cwd"]:
+                cmd = "cd %s && %s" % (p["cwd"], cmd)
+            pane = "split" if p["role"] == "right" else "primary"
+            agtermctl("session", "type", "--target", sid, "--pane", pane, cmd + "\n")
+            print("      %-8s %s" % (p["role"], cmd))
+
+    print("\nDone. The restored sessions are live again, so agterm-backup covers them "
+          "from here on.")
+    if not args.keep:
+        os.remove(path)
+        print("Archive consumed (%s). Use --keep to restore without removing it." % path)
+    return 0
+
+
+def cmd_drop(args):
+    path = archive_path(args.name)
+    if not os.path.exists(path):
+        die("no archive named %r" % args.name)
+    os.remove(path)
+    print("dropped %s" % path)
+    return 0
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="agterm-archive",
+                                 description=__doc__.split("\n")[0])
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    a = sub.add_parser("archive", help="snapshot a workspace and close it")
+    a.add_argument("workspace", nargs="?", help="name or id (default: active workspace)")
+    a.add_argument("--keep", action="store_true", help="snapshot without closing")
+    a.add_argument("--force", action="store_true", help="overwrite an existing archive")
+    a.set_defaults(fn=cmd_archive)
+
+    l = sub.add_parser("list", help="list archived workspaces")
+    l.set_defaults(fn=cmd_list)
+
+    r = sub.add_parser("restore", help="recreate an archived workspace")
+    r.add_argument("name")
+    r.add_argument("--no-boot", action="store_true", help="recreate shells, skip claude")
+    r.add_argument("--keep", action="store_true", help="keep the archive file after restoring")
+    r.add_argument("--force", action="store_true", help="restore even if the workspace is open")
+    r.set_defaults(fn=cmd_restore)
+
+    d = sub.add_parser("drop", help="delete an archive")
+    d.add_argument("name")
+    d.set_defaults(fn=cmd_drop)
+
+    args = ap.parse_args()
+    return args.fn(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
