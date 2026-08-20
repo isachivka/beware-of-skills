@@ -90,6 +90,11 @@ agterm-backup restore           # type `claude --resume <id>` into each restored
 
 **Triggers:** `agterm-backup`, "reboot without losing sessions", "resume claude after restart", "capture running claude sessions".
 
+Both agents are covered: Codex fires the same hook events with the same payload, so
+`install` wires the one capture hook into `~/.claude/settings.json` and
+`~/.codex/config.toml`. Codex asks you to trust changed hooks on its next start — pick
+"Trust all and continue" once, or the hook never fires.
+
 ### memory-review
 
 Turns an agent memory directory into one reviewable document, collects a verdict on every
@@ -133,9 +138,9 @@ revdiff".
 
 ### agterm-fork
 
-Forks the claude running in an agterm pane into a sibling session: same workspace, same
-launch flags, the whole conversation resumed under a fresh session id
-(`claude --resume <id> --fork-session`). The fork waits at its prompt — you open it and say
+Forks the agent running in an agterm pane — Claude Code or Codex — into a sibling session:
+same workspace, same launch flags, the whole conversation resumed under a fresh session id
+(`claude --resume <id> --fork-session`, or `codex fork <id>`). The fork waits at its prompt — you open it and say
 what it should do — and the original session carries on untouched.
 
 ```bash
@@ -159,9 +164,9 @@ claude id, so it is read from the live record that skill's hook writes.
 ### agterm-archive
 
 Parks a whole workspace on disk. Snapshots every session — order, names, cwds, splits with
-their ratios, and each pane's claude session id and launch flags — then closes the
-workspace. Later, `restore` recreates the whole thing and resumes every claude where it left
-off.
+their ratios, and each pane's agent session id and launch flags — then closes the
+workspace. Later, `restore` recreates the whole thing and resumes every agent (Claude Code
+or Codex) where it left off.
 
 ```bash
 agterm-archive archive beware-of-skills

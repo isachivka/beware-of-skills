@@ -2,22 +2,31 @@
 name: agterm-backup
 description: >
   Back up and restore agterm sessions across an app/computer restart, resuming each
-  running Claude Code session in its original pane (claude --resume <id>). Use when
+  running agent session in its original pane — Claude Code (claude --resume <id>) and
+  Codex (codex resume <id>). Use when
   the user wants to reboot (to apply a macOS or agterm update) without losing running
   claude sessions, to capture the current sessions, to check capture coverage, or to
   restore/resume sessions after a restart.
 when_to_use: >
   Trigger on: agterm-backup, backup sessions, restore sessions, resume claude after
   reboot, "I need to reboot but don't want to lose my sessions", capture running
-  claude sessions, agterm update without losing work, agterm-backup install / snap /
-  status / restore.
+  claude sessions, codex sessions, agterm update without losing work, agterm-backup
+  install / snap / status / restore.
 allowed-tools: Bash
 ---
 
 # agterm-backup
 
-Bring your running agterm sessions — especially Claude Code sessions, **resumed** —
-back after an agterm or macOS restart.
+Bring your running agterm sessions — Claude Code and Codex, **resumed** — back after an
+agterm or macOS restart.
+
+Codex support rides on the same machinery: it fires the same hook events
+(`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `Stop`) with the same
+`session_id`/`transcript_path` payload, so one capture hook serves both. `install` wires
+it into `~/.codex/config.toml`; **codex then asks you to trust the changed hooks on its
+next start — pick "Trust all and continue" once, or it never runs.** A pane's live record
+carries which agent wrote it, so a pane that ran claude yesterday and codex today is never
+resumed with the wrong one.
 
 ## Why it works (verified against agterm source)
 

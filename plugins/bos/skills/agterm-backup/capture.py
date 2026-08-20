@@ -4,13 +4,16 @@
 Registered as a Claude Code hook (SessionStart / UserPromptSubmit / PreToolUse /
 Stop). On every invocation it records the deterministic mapping
 
-    AGTERM_SESSION_ID (the agterm pane, from env)  ->  claude session_id (from stdin)
+    AGTERM_SESSION_ID (the agterm pane, from env)  ->  agent session_id (from stdin)
 
 into ~/.agterm-backup/live/<AGTERM_SESSION_ID>.json.
 
 Contract:
 - Reads the hook JSON payload from stdin; reads AGTERM_* from the environment
-  (inherited from the claude process that agterm launched).
+  (inherited from the agent process that agterm launched).
+- argv[1] names the agent ("claude" or "codex"); claude is assumed when absent.
+  Codex fires the same event names with the same session_id/transcript_path payload,
+  so one script serves both.
 - NEVER writes to stdout (a SessionStart hook's stdout is injected into the
   session as context) and ALWAYS exits 0 (a hook must never disturb the session).
 - Atomic write, so a concurrent snapshot never reads a half-written file.
@@ -48,6 +51,7 @@ def main() -> None:
     role = os.environ.get("AGTERM_PANE") or "left"
 
     record = {
+        "agent": (sys.argv[1] if len(sys.argv) > 1 else "claude"),
         "pane_uuid": pane,
         "workspace_id": os.environ.get("AGTERM_WORKSPACE_ID") or None,
         "window_id": os.environ.get("AGTERM_WINDOW_ID") or None,

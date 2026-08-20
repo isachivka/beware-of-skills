@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""agterm-fork — branch the claude running in an agterm pane into a sibling session.
+"""agterm-fork — branch the agent running in an agterm pane into a sibling session.
 
-The fork resumes the same conversation under a NEW claude session id
-(`--resume <id> --fork-session`), inherits the parent's launch flags, lands in the
-same workspace right after the source session, and stops at its prompt.
+Works for claude (`--resume <id> --fork-session`) and codex (`codex fork <id>`): the
+fork replays the same conversation under a NEW session id, inherits the parent's launch
+flags, lands in the same workspace right after the source session, and stops at its
+prompt.
 
 Session ids come from the agterm-backup capture hook
 (~/.agterm-backup/live/<pane>-<role>.json); a pane whose claude was itself resumed
@@ -56,12 +57,24 @@ def find_session(tree, pane_id):
     return None, None
 
 
-def strip_resume(argv):
-    """argv after 'claude', minus --resume/-r (+value), --continue, --fork-session."""
+AGENTS = ("claude", "codex")
+UUID_RE = __import__("re").compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+                                   r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+def strip_resume(argv, agent="claude"):
+    """argv after the binary, minus whatever re-enters an existing session."""
     out, skip = [], False
-    for a in argv[1:]:
+    for i, a in enumerate(argv[1:]):
         if skip:
             skip = False
+            continue
+        if agent == "codex":
+            if i == 0 and a in ("resume", "fork"):
+                continue
+            if a == "--last" or UUID_RE.match(a):
+                continue
+            out.append(a)
             continue
         if a in ("--resume", "-r"):
             skip = True
@@ -72,20 +85,36 @@ def strip_resume(argv):
     return out
 
 
+def fork_cmd(agent, sid, flags):
+    """The shell line that opens a divergent copy of session `sid`."""
+    if agent == "codex":
+        return " ".join(["codex", "fork", sid] + list(flags))
+    return " ".join(["claude", "--resume", sid, "--fork-session"] + list(flags))
+
+
 def resume_id(argv):
+    """The session id already on the command line: `claude --resume <id>` or
+    `codex resume|fork <id>`."""
     for i, a in enumerate(argv):
-        if a in ("--resume", "-r") and i + 1 < len(argv):
-            return argv[i + 1]
+        if a in ("--resume", "-r", "resume", "fork") and i + 1 < len(argv):
+            cand = argv[i + 1]
+            if UUID_RE.match(cand):
+                return cand
     return None
 
 
-def live_id(pane_id, role):
+def live_id(pane_id, role, agent):
+    """The hook's record for this pane, only if the same agent wrote it — a pane that
+    ran claude yesterday and codex today must not fork the claude."""
     path = os.path.join(LIVE_DIR, "%s-%s.json" % (pane_id.upper(), role))
     try:
         with open(path) as fh:
-            return json.load(fh).get("claude_session_id")
+            rec = json.load(fh)
     except Exception:
         return None
+    if (rec.get("agent") or "claude") != agent:
+        return None
+    return rec.get("claude_session_id")
 
 
 def cmd_fork(args):
@@ -106,23 +135,24 @@ def cmd_fork(args):
         argv = s.get("foreground") or []
         cwd = s.get("cwd") or HOME
 
-    if not argv or os.path.basename(argv[0]) != "claude":
-        die("no claude running in %s/%s — nothing to fork" % (pane_id[:8], role))
+    agent = os.path.basename(argv[0]) if argv else ""
+    if agent not in AGENTS:
+        die("no claude or codex running in %s/%s — nothing to fork" % (pane_id[:8], role))
 
-    sid = live_id(pane_id, role) or resume_id(argv)
+    sid = live_id(pane_id, role, agent) or resume_id(argv)
     if not sid:
-        die("no claude session id for this pane.\n"
+        die("no %s session id for this pane.\n" % agent +
             "The agterm-backup capture hook is what records it — run "
             "'agterm-backup install', then act once in that session and retry.")
 
-    flags = strip_resume(argv)
+    flags = strip_resume(argv, agent)
     name = args.name or ("fork: " + (s.get("name") or "session"))
 
     if args.dry_run:
-        print("would fork %s/%s (workspace %s)" % (s.get("name") or pane_id[:8], role,
+        print("would fork %s/%s (%s, workspace %s)" % (s.get("name") or pane_id[:8], role, agent,
                                                    ws.get("name") or "?"))
         print("  cwd:  %s" % cwd)
-        print("  boot: %s" % " ".join(["claude", "--resume", sid, "--fork-session"] + flags))
+        print("  boot: %s" % fork_cmd(agent, sid, flags))
         return 0
 
     created = agtermctl("session", "new", "--after", pane_id, "--cwd", cwd,
@@ -131,12 +161,12 @@ def cmd_fork(args):
     if not new_id:
         die("could not create the session: %s" % created)
 
-    cmd = " ".join(["claude", "--resume", sid, "--fork-session"] + flags)
+    cmd = fork_cmd(agent, sid, flags)
     agtermctl("session", "type", "--target", new_id, cmd + "\n")
 
     print("forked %s/%s -> %s" % (s.get("name") or pane_id[:8], role, name))
     print("  workspace: %s" % (ws.get("name") or "?"))
-    print("  parent claude session: %s" % sid)
+    print("  parent %s session: %s" % (agent, sid))
     print("  booting: %s" % cmd)
     print("\nThe fork wakes up with the full history and waits at its prompt — "
           "open it and tell it what to do.")

@@ -38,6 +38,10 @@ LIVE_DIR = os.path.join(STATE_DIR, "live")
 SNAP_DIR = os.path.join(STATE_DIR, "snapshots")
 LATEST = os.path.join(STATE_DIR, "snapshot.json")
 SETTINGS = os.path.join(HOME, ".claude", "settings.json")
+CODEX_CONFIG = os.path.join(HOME, ".codex", "config.toml")
+CODEX_BEGIN = "# >>> agterm-backup capture hook (managed) >>>"
+CODEX_END = "# <<< agterm-backup capture hook <<<"
+AGENTS = ("claude", "codex")
 SKILL_DIR = os.path.dirname(os.path.abspath(__file__))
 CAPTURE = os.path.join(SKILL_DIR, "capture.py")
 PROJECTS = os.path.join(HOME, ".claude", "projects")
@@ -76,23 +80,27 @@ def load_tree():
     return {}
 
 
-def iter_claude_panes(tree):
-    """Yield (pane_uuid, role, cwd, workspace_name, title, flags, is_shell) for every
-    pane currently running claude (main and split)."""
+def iter_agent_panes(tree):
+    """Yield (pane_uuid, role, cwd, workspace_name, title, flags, agent) for every pane
+    currently running an agent (claude or codex), main and split."""
     for ws in tree.get("workspaces", []):
         wsname = ws.get("name")
         for s in ws.get("sessions", []):
             pid = (s.get("id") or "").upper()
-            # main / left pane
-            fg = s.get("foreground") or []
-            if fg and os.path.basename(fg[0]) == "claude":
-                yield (pid, "left", s.get("cwd") or "", wsname,
-                       s.get("title") or "", _flags(fg), False)
-            # split / right pane
-            sfg = s.get("splitForeground") or []
-            if sfg and os.path.basename(sfg[0]) == "claude":
-                yield (pid, "right", s.get("splitCwd") or s.get("cwd") or "",
-                       wsname, s.get("title") or "", _flags(sfg), False)
+            for role, fg, cwd in (
+                ("left", s.get("foreground") or [], s.get("cwd") or ""),
+                ("right", s.get("splitForeground") or [],
+                 s.get("splitCwd") or s.get("cwd") or ""),
+            ):
+                agent = os.path.basename(fg[0]) if fg else ""
+                if agent in AGENTS:
+                    yield (pid, role, cwd, wsname, s.get("title") or "",
+                           _flags(fg, agent), agent)
+
+
+# kept for older call sites / muscle memory
+def iter_claude_panes(tree):
+    return iter_agent_panes(tree)
 
 
 def all_panes(tree):
@@ -107,14 +115,25 @@ def all_panes(tree):
     return out
 
 
-def _flags(argv):
-    """argv after 'claude', dropping any prior --resume/-r/--continue and its value."""
+def _flags(argv, agent="claude"):
+    """argv after the binary, dropping whatever re-enters an existing session:
+    claude's --resume/-r <id>, --continue, --fork-session; codex's `resume`/`fork`
+    subcommand with its id, and --last."""
     rest = list(argv[1:])
     out = []
     skip = False
-    for a in rest:
+    for i, a in enumerate(rest):
         if skip:
             skip = False
+            continue
+        if agent == "codex":
+            if i == 0 and a in ("resume", "fork"):
+                continue
+            if a == "--last":
+                continue
+            if UUID_RE.fullmatch(a):
+                continue
+            out.append(a)
             continue
         if a in ("--resume", "-r"):
             skip = True
@@ -123,6 +142,22 @@ def _flags(argv):
             continue
         out.append(a)
     return out
+
+
+def live_for(live, pid, role, agent):
+    """A pane's live record, but only when it was written by the agent running there
+    now — a pane that ran claude yesterday and codex today must not resume the claude."""
+    rec = live.get((pid, role))
+    if rec and (rec.get("agent") or "claude") == agent:
+        return rec
+    return None
+
+
+def resume_cmd(agent, sid, flags):
+    """The shell line that puts an agent back into session `sid`."""
+    if agent == "codex":
+        return " ".join(["codex", "resume", sid] + list(flags))
+    return " ".join(["claude", "--resume", sid] + list(flags))
 
 
 def read_live():
@@ -139,10 +174,10 @@ def read_live():
     return out
 
 
-def harvest_scrollback(pane_uuid, cwd):
-    """Deterministic bonus: if `/status` was run in the pane, its scrollback shows
-    'Session ID: <uuid>'. Accept it only if a matching transcript exists in the
-    pane's project dir."""
+def harvest_scrollback(pane_uuid, cwd, agent="claude"):
+    """Deterministic bonus: claude's `/status` prints 'Session ID: <uuid>', and codex
+    prints 'codex resume <uuid>' when it exits. Accept an id only if its transcript
+    exists on disk."""
     try:
         out = subprocess.run(["agtermctl", "session", "text", "--all",
                               "--target", pane_uuid], capture_output=True,
@@ -151,6 +186,12 @@ def harvest_scrollback(pane_uuid, cwd):
         return None
     if out.returncode != 0:
         return None
+    if agent == "codex":
+        ids = re.findall(r"codex resume ([0-9a-fA-F-]{36})", out.stdout)
+        for cand in reversed(ids):
+            if _codex_thread_exists(cand.lower()):
+                return cand.lower()
+        return None
     proj = os.path.join(PROJECTS, slug(cwd))
     # scan newest-first: last printed id wins
     ids = UUID_RE.findall(out.stdout)
@@ -158,6 +199,14 @@ def harvest_scrollback(pane_uuid, cwd):
         if os.path.exists(os.path.join(proj, cand.lower() + ".jsonl")):
             return cand.lower()
     return None
+
+
+def _codex_thread_exists(sid):
+    """A codex thread lives as a rollout file named ...-<id>.jsonl under ~/.codex."""
+    root = os.path.join(HOME, ".codex", "sessions")
+    for hit in glob.glob(os.path.join(root, "*", "*", "*", "*%s.jsonl" % sid)):
+        return True
+    return False
 
 
 # -------------------------------------------------------------------------- install
@@ -203,10 +252,11 @@ def cmd_install(args):
         fh.write("\n")
 
     if added:
-        print("installed capture hook on: %s" % ", ".join(added))
+        print("installed claude capture hook on: %s" % ", ".join(added))
     else:
-        print("capture hook already installed on all events")
+        print("claude capture hook already installed on all events")
     print("command: %s" % command)
+    _install_codex_hooks(py)
     print("\nNOTE: the hook fires on a session's NEXT event. Already-running "
           "sessions are captured when they next act (a prompt, a tool call, a turn "
           "end). Run 'agterm-backup status' to see coverage; 'agterm-backup snap' "
@@ -214,38 +264,90 @@ def cmd_install(args):
     return 0
 
 
+def _codex_block(py):
+    lines = [CODEX_BEGIN]
+    for event in CAPTURE_EVENTS:
+        lines += ["[[hooks.%s]]" % event,
+                  "[[hooks.%s.hooks]]" % event,
+                  'type = "command"',
+                  'command = "%s %s codex"' % (py, CAPTURE),
+                  ""]
+    lines.append(CODEX_END)
+    return "\n".join(lines) + "\n"
+
+
+def _install_codex_hooks(py):
+    """Codex fires the same events with the same payload, but is configured in TOML."""
+    if not os.path.isdir(os.path.dirname(CODEX_CONFIG)):
+        print("codex not installed (%s missing) — skipping codex hooks"
+              % os.path.dirname(CODEX_CONFIG))
+        return
+    try:
+        with open(CODEX_CONFIG) as fh:
+            conf = fh.read()
+    except FileNotFoundError:
+        conf = ""
+    if conf:
+        with open(CODEX_CONFIG + ".agterm-backup.bak", "w") as fh:
+            fh.write(conf)
+    block = _codex_block(py)
+    if CODEX_BEGIN in conf and CODEX_END in conf:
+        head, rest = conf.split(CODEX_BEGIN, 1)
+        conf = head + block + rest.split(CODEX_END, 1)[1].lstrip("\n")
+        what = "updated"
+    else:
+        conf = conf.rstrip("\n") + "\n\n" + block
+        what = "installed"
+    with open(CODEX_CONFIG, "w") as fh:
+        fh.write(conf)
+    print("%s codex capture hook in %s" % (what, CODEX_CONFIG))
+    print("  NOTE: codex asks you to trust changed hooks on its next start — pick "
+          "\"Trust all and continue\" once, or the hook never runs.")
+
+
 # --------------------------------------------------------------------------- status
 
 def cmd_status(args):
     tree = load_tree()
     live = read_live()
-    claude = list(iter_claude_panes(tree))
+    panes = list(iter_agent_panes(tree))
     hook_ok = _hook_installed()
 
-    print("hook installed : %s" % ("yes" if hook_ok else "NO — run: agterm-backup install"))
+    print("claude hook    : %s" % ("yes" if hook_ok else "NO — run: agterm-backup install"))
+    print("codex hook     : %s" % ("yes" if _codex_hook_installed()
+                                   else "no  — run: agterm-backup install"))
     print("live captures  : %d file(s) in %s" % (len(live), LIVE_DIR))
     age = "-"
     if os.path.exists(LATEST):
         age = "%ds ago" % int(time.time() - os.path.getmtime(LATEST))
     print("last snapshot  : %s" % age)
     print()
-    print("running claude panes: %d" % len(claude))
-    print("  %-10s %-6s %-28s %-8s %s" % ("pane", "role", "cwd", "state", "session id"))
+    print("running agent panes: %d" % len(panes))
+    print("  %-10s %-6s %-7s %-26s %-8s %s"
+          % ("pane", "role", "agent", "cwd", "state", "session id"))
     missing = 0
-    for pid, role, cwd, wsname, title, flags, _ in claude:
-        rec = live.get((pid, role))
+    for pid, role, cwd, wsname, title, flags, agent in panes:
+        rec = live_for(live, pid, role, agent)
         if rec:
             sid = rec["claude_session_id"][:8] + "…  (hook)"
         else:
             sid = "— not captured —"
             missing += 1
-        print("  %-10s %-6s %-28s %-8s %s"
-              % (pid[:8], role, cwd[:28], wsname or "?", sid))
+        print("  %-10s %-6s %-7s %-26s %-8s %s"
+              % (pid[:8], role, agent, cwd[:26], wsname or "?", sid))
     if missing:
         print("\n%d pane(s) not yet captured. They register on their next activity, "
               "or run 'agterm-backup snap --harvest' to try scrollback (needs /status "
               "to have been run there)." % missing)
     return 0
+
+
+def _codex_hook_installed():
+    try:
+        with open(CODEX_CONFIG) as fh:
+            return CODEX_BEGIN in fh.read()
+    except Exception:
+        return False
 
 
 def _hook_installed():
@@ -273,16 +375,16 @@ def cmd_snap(args):
     live = read_live()
 
     panes = []
-    for pid, role, cwd, wsname, title, flags, _ in iter_claude_panes(tree):
-        rec = live.get((pid, role))
+    for pid, role, cwd, wsname, title, flags, agent in iter_agent_panes(tree):
+        rec = live_for(live, pid, role, agent)
         sid = rec["claude_session_id"] if rec else None
         source = "hook" if rec else None
         if not sid and args.harvest:
-            sid = harvest_scrollback(pid, cwd)
+            sid = harvest_scrollback(pid, cwd, agent)
             source = "scrollback" if sid else None
         panes.append({
             "pane_uuid": pid, "pane_role": role, "workspace_name": wsname,
-            "cwd": cwd, "session_title": title, "resume_flags": flags,
+            "cwd": cwd, "session_title": title, "resume_flags": flags, "agent": agent,
             "claude_session_id": sid, "id_source": source,
         })
 
@@ -341,12 +443,12 @@ def cmd_restore(args):
         tree = load_tree()
         live = read_live()
         panes = []
-        for pid, role, cwd, wsname, title, flags, _ in iter_claude_panes(tree):
-            rec = live.get((pid, role))
+        for pid, role, cwd, wsname, title, flags, agent in iter_agent_panes(tree):
+            rec = live_for(live, pid, role, agent)
             panes.append({
                 "pane_uuid": pid, "pane_role": role, "cwd": cwd,
                 "workspace_name": wsname, "session_title": title,
-                "resume_flags": flags,
+                "resume_flags": flags, "agent": agent,
                 "claude_session_id": rec["claude_session_id"] if rec else None,
                 "id_source": "hook" if rec else None,
             })
@@ -372,15 +474,14 @@ def cmd_restore(args):
             plan.append((p, None, "SKIP: pane not present after restart"))
             continue
         fg = live_panes[key]
-        if fg and os.path.basename(fg[0]) == "claude":
-            plan.append((p, None, "SKIP: claude already running in this pane"))
+        if fg and os.path.basename(fg[0]) in AGENTS:
+            plan.append((p, None, "SKIP: %s already running in this pane"
+                         % os.path.basename(fg[0])))
             continue
-        cmd = "claude --resume %s" % sid
-        if p.get("resume_flags"):
-            cmd += " " + " ".join(p["resume_flags"])
+        cmd = resume_cmd(p.get("agent") or "claude", sid, p.get("resume_flags") or [])
         plan.append((p, cmd, "inject"))
 
-    print("Restore plan (%d claude pane(s)):\n" % len(snap["panes"]))
+    print("Restore plan (%d agent pane(s)):\n" % len(snap["panes"]))
     inject = []
     for p, cmd, note in plan:
         tag = "%s/%s" % (p.get("workspace_name") or "?", p["pane_uuid"][:8])

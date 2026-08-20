@@ -69,11 +69,24 @@ def slug(name):
     return re.sub(r"[^a-zA-Z0-9._-]", "-", name).strip("-") or "workspace"
 
 
-def strip_resume(argv):
+AGENTS = ("claude", "codex")
+UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+                     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+def strip_resume(argv, agent="claude"):
+    """argv after the binary, minus whatever re-enters an existing session."""
     out, skip = [], False
-    for a in argv[1:]:
+    for i, a in enumerate(argv[1:]):
         if skip:
             skip = False
+            continue
+        if agent == "codex":
+            if i == 0 and a in ("resume", "fork"):
+                continue
+            if a == "--last" or UUID_RE.match(a):
+                continue
+            out.append(a)
             continue
         if a in ("--resume", "-r"):
             skip = True
@@ -84,29 +97,45 @@ def strip_resume(argv):
     return out
 
 
+def resume_cmd(agent, sid, flags):
+    if agent == "codex":
+        return " ".join(["codex", "resume", sid] + list(flags))
+    return " ".join(["claude", "--resume", sid] + list(flags))
+
+
 def resume_id(argv):
+    """The session id already on the command line: `claude --resume <id>` or
+    `codex resume|fork <id>`."""
     for i, a in enumerate(argv):
-        if a in ("--resume", "-r") and i + 1 < len(argv):
-            return argv[i + 1]
+        if a in ("--resume", "-r", "resume", "fork") and i + 1 < len(argv):
+            cand = argv[i + 1]
+            if UUID_RE.match(cand):
+                return cand
     return None
 
 
-def live_id(pane_id, role):
+def live_id(pane_id, role, agent):
+    """The hook's record for this pane, only if the same agent wrote it."""
     try:
         with open(os.path.join(LIVE_DIR, "%s-%s.json" % (pane_id.upper(), role))) as fh:
-            return json.load(fh).get("claude_session_id")
+            rec = json.load(fh)
     except Exception:
         return None
+    if (rec.get("agent") or "claude") != agent:
+        return None
+    return rec.get("claude_session_id")
 
 
 def pane_record(pane_id, role, argv, cwd):
-    is_claude = bool(argv) and os.path.basename(argv[0]) == "claude"
+    agent = os.path.basename(argv[0]) if argv else ""
+    is_agent = agent in AGENTS
     return {
         "role": role,
         "cwd": cwd,
-        "is_claude": is_claude,
-        "claude_session_id": (live_id(pane_id, role) or resume_id(argv)) if is_claude else None,
-        "flags": strip_resume(argv) if is_claude else [],
+        "agent": agent if is_agent else None,
+        "is_claude": is_agent,          # kept for archives written by older versions
+        "claude_session_id": (live_id(pane_id, role, agent) or resume_id(argv)) if is_agent else None,
+        "flags": strip_resume(argv, agent) if is_agent else [],
     }
 
 
@@ -165,11 +194,12 @@ def cmd_archive(args):
         json.dump(snap, fh, indent=1)
 
     claudes = sum(1 for s in sessions for p in s["panes"] if p["claude_session_id"])
-    missing = sum(1 for s in sessions for p in s["panes"] if p["is_claude"] and not p["claude_session_id"])
-    print("archived %r: %d session(s), %d claude(s) resumable" %
+    missing = sum(1 for s in sessions for p in s["panes"]
+                  if p.get("agent") and not p["claude_session_id"])
+    print("archived %r: %d session(s), %d agent(s) resumable" %
           (ws.get("name"), len(sessions), claudes))
     if missing:
-        print("  WARNING: %d claude pane(s) had no captured id and will come back as a "
+        print("  WARNING: %d agent pane(s) had no captured id and will come back as a "
               "plain shell (agterm-backup hook not installed, or that session never acted)"
               % missing)
     print("  file: %s" % path)
@@ -199,7 +229,7 @@ def cmd_list(args):
     if not rows:
         print("no archives yet")
         return 0
-    print("%-28s %-22s %8s %8s" % ("WORKSPACE", "ARCHIVED", "SESSIONS", "CLAUDES"))
+    print("%-28s %-22s %8s %8s" % ("WORKSPACE", "ARCHIVED", "SESSIONS", "AGENTS"))
     for name, ts, n, c in rows:
         print("%-28s %-22s %8d %8d" % (name, ts, n, c))
     return 0
@@ -239,7 +269,8 @@ def cmd_restore(args):
         for p in s["panes"]:
             if args.no_boot or not p.get("claude_session_id"):
                 continue
-            cmd = " ".join(["claude", "--resume", p["claude_session_id"], *p.get("flags", [])])
+            cmd = resume_cmd(p.get("agent") or "claude", p["claude_session_id"],
+                             p.get("flags", []))
             if p["role"] == "right" and p.get("cwd") and p["cwd"] != s["cwd"]:
                 cmd = "cd %s && %s" % (p["cwd"], cmd)
             agtermctl("session", "type", "--target", sid,

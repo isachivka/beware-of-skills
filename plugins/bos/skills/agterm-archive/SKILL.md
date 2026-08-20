@@ -14,8 +14,9 @@ allowed-tools: [Bash]
 
 # agterm-archive
 
-Only inside agterm. Session ids come from the `agterm-backup` capture hook — without it a
-claude pane comes back as a plain shell.
+Only inside agterm. Session ids come from the `agterm-backup` capture hook — without it an
+agent pane comes back as a plain shell. Claude and Codex panes are both handled; the
+restore types `claude --resume <id>` or `codex resume <id>` accordingly.
 
 ```bash
 agterm-archive archive [workspace]   # snapshot + close (default: active workspace)

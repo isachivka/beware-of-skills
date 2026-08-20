@@ -1,8 +1,9 @@
 ---
 name: agterm-fork
 description: >
-  Fork the claude running in an agterm pane into a sibling session: same workspace, same
-  launch flags, full conversation history under a fresh session id, waiting at its prompt.
+  Fork the agent running in an agterm pane (Claude Code or Codex) into a sibling session:
+  same workspace, same launch flags, full conversation history under a fresh session id,
+  waiting at its prompt.
   The source session is untouched. Also wires a "Fork session" entry into agterm's
   custom-command palette.
 when_to_use: >
@@ -27,13 +28,14 @@ agterm-fork uninstall            # remove it
 
 The plugin's `bin/` is on `PATH` inside a Claude Code session, so run it by name. What `fork` does:
 
-1. Reads the pane out of `agtermctl tree`, refuses if no claude runs there.
+1. Reads the pane out of `agtermctl tree`, refuses if no claude or codex runs there.
 2. Session id: the `agterm-backup` live record, falling back to a `--resume` already in the
    pane's argv. Never guessed — no id, no fork.
 3. Launch flags (`--dangerously-skip-permissions`, `--model`, …) are inherited from the
    parent's argv, minus `--resume`/`--continue`/`--fork-session`.
 4. `agtermctl session new --after <pane>` — the anchor carries the workspace, so the fork
-   lands next to its parent — then types `claude --resume <id> --fork-session <flags>`.
+   lands next to its parent — then types `claude --resume <id> --fork-session <flags>` or,
+   for codex, `codex fork <id> <flags>` (codex forks natively).
 5. Stops there. **The fork gets no task**; the user opens it and drives it.
 
 `install` writes `~/.local/bin/agterm-fork` and a managed block in
