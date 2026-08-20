@@ -131,6 +131,20 @@ String literals stay in English on purpose — they're code, and translating the
 **Triggers:** `/revdiff-ru`, "ревью на русском", "revdiff по-русски", "переведи диф и открой
 revdiff".
 
+### agterm-fork
+
+Forks the current Claude Code session into a new agterm session in the same workspace. The
+fork resumes the whole conversation under a fresh session id (`claude --resume <id>
+--fork-session`), takes a task of its own, and this session keeps going untouched.
+
+It gets the session's own claude id from the live record the `agterm-backup` hook writes —
+a session cannot otherwise know its own id — so that skill's hook is a hard dependency.
+Focus stays where you are; the fork is created next to the current session, booted, and
+handed its instruction.
+
+**Triggers:** `/bos:agterm-fork`, "форкни сессию", "fork this session", "продолжи это в
+соседней вкладке".
+
 ## Skills — `bosp` (personal)
 
 Wired to my home router and my Ozon account. Install with `/plugin install bosp@beware-of-skills` if you really want them.
