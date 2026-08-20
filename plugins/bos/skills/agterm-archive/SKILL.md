@@ -33,7 +33,9 @@ agterm-archive uninstall             # remove them
 restores the pick). The wrapper resolves the newest installed copy of the skill at call
 time, because the plugin cache path carries a commit sha.
 
-Archives live in `~/.agterm-backup/archives/<name>.json`.
+The plugin's `bin/` is on `PATH` inside a Claude Code session, so run it by name.
+Archives live in `~/.agterm-backup/archives/<name>.json`, the run log in
+`~/.agterm-backup/archive.log` — palette commands print nowhere else.
 
 - `archive` records every session's name, cwd, title, order, split (axis + ratio) and, per pane,
   the claude session id plus its launch flags. Then `agtermctl workspace delete`. It refuses

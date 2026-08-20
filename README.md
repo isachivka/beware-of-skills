@@ -143,6 +143,9 @@ agterm-fork                # fork the current pane
 agterm-fork install        # add "Fork session" to agterm's command palette (ctrl+a>f)
 ```
 
+The plugin puts these commands on `PATH` inside a Claude Code session, so `agterm-fork
+install` runs as-is once the plugin is installed.
+
 `install` writes a wrapper to `~/.local/bin` and a managed block in `keymap.conf`, so you
 can fork whatever session the cursor is on without going through Claude at all. The wrapper
 resolves the newest installed copy of the skill at call time — plugin cache paths carry a

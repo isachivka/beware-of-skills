@@ -25,8 +25,7 @@ agterm-fork install              # wire the "Fork session" custom command
 agterm-fork uninstall            # remove it
 ```
 
-Run it from `~/.local/bin/agterm-fork` once `install` has been run, otherwise from the
-skill directory. What `fork` does:
+The plugin's `bin/` is on `PATH` inside a Claude Code session, so run it by name. What `fork` does:
 
 1. Reads the pane out of `agtermctl tree`, refuses if no claude runs there.
 2. Session id: the `agterm-backup` live record, falling back to a `--resume` already in the
