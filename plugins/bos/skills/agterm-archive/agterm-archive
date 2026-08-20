@@ -284,18 +284,23 @@ def cmd_pick_restore(args):
     for _ in range(600):                             # 5 min at 0.5s
         time.sleep(0.5)
         res = agtermctl("pick", "result", pid, "--json", check=False)
-        r = res.get("result") if isinstance(res, dict) else None
-        if isinstance(r, dict):                      # tolerate a richer future shape
-            r = r.get("choice") or r.get("value")
-        if not isinstance(r, str) or r == "pending":
+        if not isinstance(res, dict):
             continue
-        if r == "cancelled":
+        state = res.get("result")
+        if state == "pending":
+            continue
+        if state == "cancelled":
             log("picker cancelled")
             return 0
-        picked = r
+        # {"result":"picked","id":...,"label":...,"index":N} / {"result":"custom","query":...}
+        idx = res.get("index")
+        if isinstance(idx, int) and 0 <= idx < len(names):
+            picked = names[idx]
+        else:
+            picked = res.get("label") or res.get("id") or res.get("query")
         break
-    if not picked:
-        log("picker timed out")
+    if not isinstance(picked, str) or not picked:
+        log("picker gave nothing usable")
         return 0
     log("picked %r" % picked)
     args.name, args.no_boot, args.keep, args.force = picked, False, False, False
