@@ -135,12 +135,12 @@ revdiff".
 
 Forks the current Claude Code session into a new agterm session in the same workspace. The
 fork resumes the whole conversation under a fresh session id (`claude --resume <id>
---fork-session`), takes a task of its own, and this session keeps going untouched.
+--fork-session`), keeps the flags this session was launched with, and waits at its prompt —
+you walk over and type what it should do. The original session is untouched.
 
-It gets the session's own claude id from the live record the `agterm-backup` hook writes —
-a session cannot otherwise know its own id — so that skill's hook is a hard dependency.
-Focus stays where you are; the fork is created next to the current session, booted, and
-handed its instruction.
+Works only inside agterm, and only alongside `agterm-backup`: a session cannot know its own
+claude id, so it is read from the live record that skill's hook writes. Launch flags are
+recovered by walking up the process tree to the `claude` process.
 
 **Triggers:** `/bos:agterm-fork`, "форкни сессию", "fork this session", "продолжи это в
 соседней вкладке".
