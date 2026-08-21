@@ -462,9 +462,9 @@ def cmd_install(args):
     os.chmod(WRAPPER, 0o755)
 
     w = WRAPPER.replace(HOME, "$HOME")
-    arch_chord = "" if args.no_chord else (args.archive_chord or "ctrl+a>a") + " "
-    sess_chord = "" if args.no_chord else (args.session_chord or "ctrl+a>s") + " "
-    rest_chord = "" if args.no_chord else (args.restore_chord or "ctrl+a>r") + " "
+    arch_chord = "" if args.no_chord else (args.archive_chord or "cmd+ctrl+a>a") + " "
+    sess_chord = "" if args.no_chord else (args.session_chord or "cmd+ctrl+a>s") + " "
+    rest_chord = "" if args.no_chord else (args.restore_chord or "cmd+ctrl+a>r") + " "
     block = (
         "%s\n"
         'command "Archive workspace" %s%s archive "$AGT_WORKSPACE_ID"\n'
@@ -554,9 +554,9 @@ def main():
     pr.set_defaults(fn=cmd_pick_restore)
 
     i = sub.add_parser("install", help="wire the archive/restore custom commands")
-    i.add_argument("--archive-chord", help="chord for Archive workspace (default: ctrl+a>a)")
-    i.add_argument("--session-chord", help="chord for Archive session (default: ctrl+a>s)")
-    i.add_argument("--restore-chord", help="chord for Restore workspace (default: ctrl+a>r)")
+    i.add_argument("--archive-chord", help="chord for Archive workspace (default: cmd+ctrl+a>a)")
+    i.add_argument("--session-chord", help="chord for Archive session (default: cmd+ctrl+a>s)")
+    i.add_argument("--restore-chord", help="chord for Restore workspace (default: cmd+ctrl+a>r)")
     i.add_argument("--no-chord", action="store_true", help="palette-only, no key bindings")
     i.set_defaults(fn=cmd_install)
 

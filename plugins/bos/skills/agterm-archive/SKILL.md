@@ -24,15 +24,15 @@ agterm-archive session [target]      # snapshot + close ONE session (default: ac
 agterm-archive list                  # what is parked, both kinds
 agterm-archive restore <name>        # recreate it, resume the agents
 agterm-archive drop <name>           # forget an archive
-agterm-archive install               # add the palette entries (ctrl+a>a / ctrl+a>r)
+agterm-archive install               # add the palette entries (cmd+ctrl+a>a / cmd+ctrl+a>r)
 agterm-archive uninstall             # remove them
 ```
 
 `install` writes `~/.local/bin/agterm-archive` and a managed block in
 `~/.config/agterm/keymap.conf` with two custom commands: **Archive workspace**
-(`ctrl+a>a`, archives the workspace the cursor is in, passing `$AGT_WORKSPACE_ID`) and
-**Archive session** (`ctrl+a>s`, archives just the session under the cursor) and
-**Restore archive** (`ctrl+a>r`, lists both kinds in agterm's native fuzzy picker — rows
+(`cmd+ctrl+a>a`, archives the workspace the cursor is in, passing `$AGT_WORKSPACE_ID`) and
+**Archive session** (`cmd+ctrl+a>s`, archives just the session under the cursor) and
+**Restore archive** (`cmd+ctrl+a>r`, lists both kinds in agterm's native fuzzy picker — rows
 read `workspace: name` / `session: workspace / name` — and restores the pick). The wrapper resolves the newest installed copy of the skill at call
 time, because the plugin cache path carries a commit sha.
 

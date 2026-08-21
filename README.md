@@ -145,7 +145,7 @@ what it should do — and the original session carries on untouched.
 
 ```bash
 agterm-fork                # fork the current pane
-agterm-fork install        # add "Fork session" to agterm's command palette (ctrl+a>f)
+agterm-fork install        # add "Fork session" to agterm's command palette (cmd+ctrl+a>f)
 ```
 
 The plugin puts these commands on `PATH` inside a Claude Code session, so `agterm-fork
@@ -173,8 +173,8 @@ agterm-archive archive beware-of-skills   # a whole workspace
 agterm-archive session                    # just one session out of it
 agterm-archive list
 agterm-archive restore beware-of-skills
-agterm-archive install    # palette: Archive workspace (ctrl+a>a), Archive session (ctrl+a>s),
-                          #          Restore archive (ctrl+a>r)
+agterm-archive install    # palette: Archive workspace (cmd+ctrl+a>a), Archive session (cmd+ctrl+a>s),
+                          #          Restore archive (cmd+ctrl+a>r)
 ```
 
 A single session can be parked on its own — it remembers which workspace it came from and
