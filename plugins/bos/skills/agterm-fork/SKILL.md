@@ -42,10 +42,11 @@ The plugin's `bin/` is on `PATH` inside a Claude Code session, so run it by name
 `~/.config/agterm/keymap.conf`:
 
 ```
-command "Fork session"  $HOME/.local/bin/agterm-fork "$AGT_SESSION_ID" "$AGT_PANE"
+command "Fork session" cmd+ctrl+a>f $HOME/.local/bin/agterm-fork "$AGT_SESSION_ID" "$AGT_PANE"
 ```
 
-so `Ctrl-Shift-O` → "Fork session" forks whatever session the cursor is on, no Claude
+so `cmd+ctrl+a>f`, or `Ctrl-Shift-O` → "Fork session", forks whatever session the cursor is
+on, no Claude
 involved. The wrapper resolves the newest installed copy of the skill at call time, because
 the plugin cache path carries a commit sha and would otherwise break on every update.
 
