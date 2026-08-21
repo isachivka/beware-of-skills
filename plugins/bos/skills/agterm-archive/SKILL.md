@@ -19,9 +19,10 @@ agent pane comes back as a plain shell. Claude and Codex panes are both handled;
 restore types `claude --resume <id>` or `codex resume <id>` accordingly.
 
 ```bash
-agterm-archive archive [workspace]   # snapshot + close (default: active workspace)
-agterm-archive list                  # what is parked
-agterm-archive restore <name>        # recreate it, resume the claudes
+agterm-archive archive [workspace]   # snapshot + close a whole workspace (default: active)
+agterm-archive session [target]      # snapshot + close ONE session (default: active)
+agterm-archive list                  # what is parked, both kinds
+agterm-archive restore <name>        # recreate it, resume the agents
 agterm-archive drop <name>           # forget an archive
 agterm-archive install               # add the palette entries (ctrl+a>a / ctrl+a>r)
 agterm-archive uninstall             # remove them
@@ -30,18 +31,23 @@ agterm-archive uninstall             # remove them
 `install` writes `~/.local/bin/agterm-archive` and a managed block in
 `~/.config/agterm/keymap.conf` with two custom commands: **Archive workspace**
 (`ctrl+a>a`, archives the workspace the cursor is in, passing `$AGT_WORKSPACE_ID`) and
-**Restore workspace** (`ctrl+a>r`, lists archives in agterm's native fuzzy picker and
-restores the pick). The wrapper resolves the newest installed copy of the skill at call
+**Archive session** (`ctrl+a>s`, archives just the session under the cursor) and
+**Restore archive** (`ctrl+a>r`, lists both kinds in agterm's native fuzzy picker — rows
+read `workspace: name` / `session: workspace / name` — and restores the pick). The wrapper resolves the newest installed copy of the skill at call
 time, because the plugin cache path carries a commit sha.
 
 The plugin's `bin/` is on `PATH` inside a Claude Code session, so run it by name.
-Archives live in `~/.agterm-backup/archives/<name>.json`, the run log in
+Workspace archives live in `~/.agterm-backup/archives/<name>.json`, single sessions in
+`archives/sessions/<workspace>--<session>.json`, the run log in
 `~/.agterm-backup/archive.log` — palette commands print nowhere else.
 
 - `archive` records every session's name, cwd, title, order, split (axis + ratio) and, per pane,
   the claude session id plus its launch flags. Then `agtermctl workspace delete`. It refuses
   to archive the workspace it is running in — that would kill the caller — and warns when a
   claude pane has no captured id. `--keep` snapshots without closing, `--force` overwrites.
+- `session` archives one session out of a workspace the same way, and remembers which
+  workspace it came from. `restore` puts it back there, creating the workspace if it is
+  gone. Same refusal to close the session it is running in, same `--keep`/`--force`.
 - `restore` recreates the sessions in order (`session new --workspace-name … --create-workspace`),
   re-opens each split at its old ratio, and types `claude --resume <id> <flags>` into each
   pane that had one. `--no-boot` leaves plain shells; `--keep` keeps the archive file

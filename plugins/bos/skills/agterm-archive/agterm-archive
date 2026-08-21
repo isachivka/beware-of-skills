@@ -20,6 +20,7 @@ HOME = os.path.expanduser("~")
 STATE_DIR = os.path.join(HOME, ".agterm-backup")
 LIVE_DIR = os.path.join(STATE_DIR, "live")
 ARCHIVE_DIR = os.path.join(STATE_DIR, "archives")
+SESSION_DIR = os.path.join(ARCHIVE_DIR, "sessions")
 KEYMAP = os.path.join(HOME, ".config", "agterm", "keymap.conf")
 WRAPPER = os.path.join(HOME, ".local", "bin", "agterm-archive")
 SKILL_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -139,6 +140,71 @@ def pane_record(pane_id, role, argv, cwd):
     }
 
 
+def snap_session(s):
+    """One session's shape plus its panes' agent ids — the unit both kinds archive."""
+    pid = (s.get("id") or "").upper()
+    rec = {
+        "name": s.get("name"),
+        "title": s.get("title"),
+        "cwd": s.get("cwd") or HOME,
+        "flagged": bool(s.get("flagged")),
+        "split": bool(s.get("split")),
+        "split_axis": s.get("splitAxis") or "vertical",
+        "split_ratio": s.get("splitRatio"),
+        "panes": [pane_record(pid, "left", s.get("foreground") or [], s.get("cwd") or HOME)],
+    }
+    if s.get("split"):
+        rec["panes"].append(pane_record(pid, "right", s.get("splitForeground") or [],
+                                        s.get("splitCwd") or s.get("cwd") or HOME))
+    return rec
+
+
+def restore_session(s, wsname, no_boot=False, after=None):
+    """Recreate one archived session in `wsname` and boot its agents."""
+    cmd = ["session", "new", "--workspace-name", wsname, "--create-workspace",
+           "--cwd", s["cwd"], "--name", s.get("name") or "", "--no-select", "--json"]
+    if after:
+        cmd = ["session", "new", "--after", after, "--cwd", s["cwd"],
+               "--name", s.get("name") or "", "--no-select", "--json"]
+    created = agtermctl(*cmd)
+    sid = created.get("result", {}).get("id")
+    if not sid:
+        print("  FAILED to create %r" % s.get("name"))
+        return None
+    print("  + %s" % (s.get("name") or sid[:8]))
+
+    if s.get("split"):
+        agtermctl("session", "split", "visibility", "on",
+                  "--axis", s.get("split_axis") or "vertical", "--target", sid)
+        if s.get("split_ratio"):
+            agtermctl("session", "resize", "--split-ratio",
+                      "%.3f" % float(s["split_ratio"]), "--target", sid)
+
+    for p in s["panes"]:
+        if no_boot or not p.get("claude_session_id"):
+            continue
+        line = resume_cmd(p.get("agent") or "claude", p["claude_session_id"],
+                          p.get("flags", []))
+        if p["role"] == "right" and p.get("cwd") and p["cwd"] != s["cwd"]:
+            line = "cd %s && %s" % (p["cwd"], line)
+        agtermctl("session", "type", "--target", sid,
+                  "--pane", "right" if p["role"] == "right" else "left", line + "\n")
+        print("      %-8s %s" % (p["role"], line))
+    return sid
+
+
+def find_session(tree, ref):
+    """(workspace, session) for a session id/prefix, or the active session."""
+    for ws in tree.get("workspaces", []):
+        for s in ws.get("sessions", []):
+            sid = (s.get("id") or "").upper()
+            if ref and (sid.startswith(ref.upper()) or s.get("name") == ref):
+                return ws, s
+            if not ref and s.get("active"):
+                return ws, s
+    return None, None
+
+
 def find_workspace(tree, ref):
     for ws in tree.get("workspaces", []):
         if ref is None and ws.get("active"):
@@ -152,6 +218,42 @@ def archive_path(name):
     return os.path.join(ARCHIVE_DIR, slug(name) + ".json")
 
 
+def session_path(wsname, name):
+    return os.path.join(SESSION_DIR, "%s--%s.json" % (slug(wsname or "?"), slug(name or "session")))
+
+
+def iter_archives():
+    """(kind, label, path, data) for every archive on disk."""
+    for d, kind in ((ARCHIVE_DIR, "workspace"), (SESSION_DIR, "session")):
+        if not os.path.isdir(d):
+            continue
+        for fn in sorted(os.listdir(d)):
+            if not fn.endswith(".json"):
+                continue
+            path = os.path.join(d, fn)
+            try:
+                with open(path) as fh:
+                    data = json.load(fh)
+            except Exception:
+                continue
+            if kind == "workspace":
+                label = data.get("workspace") or fn[:-5]
+            else:
+                label = "%s / %s" % (data.get("workspace") or "?",
+                                     data.get("session", {}).get("name") or fn[:-5])
+            yield kind, label, path, data
+
+
+def resolve_archive(name):
+    """Find an archive by workspace name, session name, or 'workspace / session'."""
+    hits = [(k, l, p, d) for k, l, p, d in iter_archives()
+            if l == name or (k == "session" and (d.get("session", {}).get("name") == name))]
+    if len(hits) > 1:
+        die("%r matches %d archives — use the full label:\n  %s"
+            % (name, len(hits), "\n  ".join(h[1] for h in hits)))
+    return hits[0] if hits else (None, None, None, None)
+
+
 # --------------------------------------------------------------------------- commands
 
 def cmd_archive(args):
@@ -163,25 +265,10 @@ def cmd_archive(args):
         die("that is the workspace you are running in — closing it would kill this session.\n"
             "Run it from elsewhere, or pass --keep to snapshot without closing.")
 
-    sessions = []
-    for s in ws.get("sessions", []):
-        pid = (s.get("id") or "").upper()
-        rec = {
-            "name": s.get("name"),
-            "title": s.get("title"),
-            "cwd": s.get("cwd") or HOME,
-            "flagged": bool(s.get("flagged")),
-            "split": bool(s.get("split")),
-            "split_axis": s.get("splitAxis") or "vertical",
-            "split_ratio": s.get("splitRatio"),
-            "panes": [pane_record(pid, "left", s.get("foreground") or [], s.get("cwd") or HOME)],
-        }
-        if s.get("split"):
-            rec["panes"].append(pane_record(pid, "right", s.get("splitForeground") or [],
-                                            s.get("splitCwd") or s.get("cwd") or HOME))
-        sessions.append(rec)
+    sessions = [snap_session(s) for s in ws.get("sessions", [])]
 
     snap = {
+        "kind": "workspace",
         "workspace": ws.get("name"),
         "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "sessions": sessions,
@@ -214,34 +301,83 @@ def cmd_archive(args):
     return 0
 
 
-def cmd_list(args):
-    if not os.path.isdir(ARCHIVE_DIR):
-        print("no archives yet")
+def cmd_archive_session(args):
+    tree = load_tree()
+    ws, sess = find_session(tree, args.session)
+    if not sess:
+        die("session %r not found" % (args.session or "active"))
+    sid = (sess.get("id") or "").upper()
+    if not args.keep and sid == (os.environ.get("AGTERM_SESSION_ID") or "").upper():
+        die("that is the session you are running in — closing it would kill this "
+            "process. Run it from elsewhere, or pass --keep to snapshot without closing.")
+
+    snap = {
+        "kind": "session",
+        "workspace": ws.get("name"),
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "session": snap_session(sess),
+    }
+    os.makedirs(SESSION_DIR, exist_ok=True)
+    path = session_path(ws.get("name"), sess.get("name"))
+    if os.path.exists(path) and not args.force:
+        die("%s / %s already archived (%s) — pass --force to overwrite"
+            % (ws.get("name"), sess.get("name"), path))
+    with open(path, "w") as fh:
+        json.dump(snap, fh, indent=1)
+
+    agents = sum(1 for p in snap["session"]["panes"] if p.get("claude_session_id"))
+    missing = sum(1 for p in snap["session"]["panes"]
+                  if p.get("agent") and not p.get("claude_session_id"))
+    print("archived session %r from %r (%d agent(s) resumable)"
+          % (sess.get("name"), ws.get("name"), agents))
+    if missing:
+        print("  WARNING: %d agent pane(s) had no captured id and will come back as a "
+              "plain shell" % missing)
+    print("  file: %s" % path)
+    if args.keep:
+        print("  --keep: session left open")
         return 0
+    agtermctl("session", "close", "--target", sid)
+    log("archived session %r / %r" % (ws.get("name"), sess.get("name")))
+    notify("archived session %s" % (sess.get("name") or sid[:8]))
+    print("  session closed. Bring it back with: agterm-archive restore %r"
+          % (sess.get("name") or ""))
+    return 0
+
+
+def cmd_list(args):
     rows = []
-    for fn in sorted(os.listdir(ARCHIVE_DIR)):
-        if not fn.endswith(".json"):
-            continue
-        with open(os.path.join(ARCHIVE_DIR, fn)) as fh:
-            d = json.load(fh)
-        claudes = sum(1 for s in d["sessions"] for p in s["panes"] if p.get("claude_session_id"))
-        rows.append((d.get("workspace") or fn[:-5], d.get("ts", "?"), len(d["sessions"]), claudes))
+    for kind, label, path, d in iter_archives():
+        sessions = d["sessions"] if kind == "workspace" else [d["session"]]
+        agents = sum(1 for s in sessions for p in s["panes"] if p.get("claude_session_id"))
+        rows.append((kind, label, d.get("ts", "?"), len(sessions), agents))
     if not rows:
         print("no archives yet")
         return 0
-    print("%-28s %-22s %8s %8s" % ("WORKSPACE", "ARCHIVED", "SESSIONS", "AGENTS"))
-    for name, ts, n, c in rows:
-        print("%-28s %-22s %8d %8d" % (name, ts, n, c))
+    print("%-10s %-34s %-22s %8s %7s"
+          % ("KIND", "NAME", "ARCHIVED", "SESSIONS", "AGENTS"))
+    for kind, label, ts, n, c in rows:
+        print("%-10s %-34s %-22s %8d %7d" % (kind, label[:34], ts, n, c))
     return 0
 
 
 def cmd_restore(args):
-    path = archive_path(args.name)
-    if not os.path.exists(path):
+    kind, label, path, snap = resolve_archive(args.name)
+    if not path:
         die("no archive named %r (see 'agterm-archive list')" % args.name)
-    with open(path) as fh:
-        snap = json.load(fh)
     wsname = snap.get("workspace") or args.name
+
+    if kind == "session":
+        sess = snap["session"]
+        print("restoring session %r into %r%s"
+              % (sess.get("name"), wsname, " (--no-boot)" if args.no_boot else ""))
+        restore_session(sess, wsname, no_boot=args.no_boot)
+        log("restored session %r / %r" % (wsname, sess.get("name")))
+        print("\nDone. The session is live again, so agterm-backup covers it from here on.")
+        if not args.keep:
+            os.remove(path)
+            print("Archive consumed (%s). Use --keep to restore without removing it." % path)
+        return 0
 
     if find_workspace(load_tree(), wsname) and not args.force:
         die("workspace %r is already open — close it first, or pass --force to add the "
@@ -250,32 +386,7 @@ def cmd_restore(args):
     print("restoring %r: %d session(s)%s" %
           (wsname, len(snap["sessions"]), "" if not args.no_boot else " (--no-boot)"))
     for s in snap["sessions"]:
-        created = agtermctl("session", "new", "--workspace-name", wsname,
-                            "--create-workspace", "--cwd", s["cwd"],
-                            "--name", s.get("name") or "", "--no-select", "--json")
-        sid = created.get("result", {}).get("id")
-        if not sid:
-            print("  FAILED to create %r" % s.get("name"))
-            continue
-        print("  + %s" % (s.get("name") or sid[:8]))
-
-        if s.get("split"):
-            agtermctl("session", "split", "visibility", "on",
-                      "--axis", s.get("split_axis") or "vertical", "--target", sid)
-            if s.get("split_ratio"):
-                agtermctl("session", "resize", "--split-ratio",
-                          "%.3f" % float(s["split_ratio"]), "--target", sid)
-
-        for p in s["panes"]:
-            if args.no_boot or not p.get("claude_session_id"):
-                continue
-            cmd = resume_cmd(p.get("agent") or "claude", p["claude_session_id"],
-                             p.get("flags", []))
-            if p["role"] == "right" and p.get("cwd") and p["cwd"] != s["cwd"]:
-                cmd = "cd %s && %s" % (p["cwd"], cmd)
-            agtermctl("session", "type", "--target", sid,
-                      "--pane", "right" if p["role"] == "right" else "left", cmd + "\n")
-            print("      %-8s %s" % (p["role"], cmd))
+        restore_session(s, wsname, no_boot=args.no_boot)
 
     log("restored %r (%d sessions)" % (wsname, len(snap["sessions"])))
     print("\nDone. The restored sessions are live again, so agterm-backup covers them "
@@ -292,13 +403,8 @@ def notify(text):
 
 def cmd_pick_restore(args):
     """Palette entry: pick an archive in the native picker, then restore it."""
-    names = []
-    if os.path.isdir(ARCHIVE_DIR):
-        for fn in sorted(os.listdir(ARCHIVE_DIR)):
-            if fn.endswith(".json"):
-                with open(os.path.join(ARCHIVE_DIR, fn)) as fh:
-                    d = json.load(fh)
-                names.append(d.get("workspace") or fn[:-5])
+    entries = [(k, l) for k, l, _p, _d in iter_archives()]
+    names = ["%s: %s" % (k, l) for k, l in entries]
     if not names:
         notify("nothing archived")
         return 0
@@ -334,6 +440,8 @@ def cmd_pick_restore(args):
         log("picker gave nothing usable")
         return 0
     log("picked %r" % picked)
+    # the picker shows "kind: label"; restore wants the label
+    picked = picked.split(": ", 1)[1] if ": " in picked else picked
     args.name, args.no_boot, args.keep, args.force = picked, False, False, False
     rc = cmd_restore(args)
     notify("restored %s" % picked)
@@ -355,12 +463,14 @@ def cmd_install(args):
 
     w = WRAPPER.replace(HOME, "$HOME")
     arch_chord = "" if args.no_chord else (args.archive_chord or "ctrl+a>a") + " "
+    sess_chord = "" if args.no_chord else (args.session_chord or "ctrl+a>s") + " "
     rest_chord = "" if args.no_chord else (args.restore_chord or "ctrl+a>r") + " "
     block = (
         "%s\n"
         'command "Archive workspace" %s%s archive "$AGT_WORKSPACE_ID"\n'
-        'command "Restore workspace" %s%s pick-restore\n'
-        "%s\n" % (BEGIN, arch_chord, w, rest_chord, w, END)
+        'command "Archive session" %s%s session "$AGT_SESSION_ID"\n'
+        'command "Restore archive" %s%s pick-restore\n'
+        "%s\n" % (BEGIN, arch_chord, w, sess_chord, w, rest_chord, w, END)
     )
     try:
         with open(KEYMAP) as fh:
@@ -378,8 +488,9 @@ def cmd_install(args):
     agtermctl("keymap", "reload")
     print("wrapper:  %s" % WRAPPER)
     print("keymap:   %s  (block updated, keymap reloaded)" % KEYMAP)
-    print('palette:  "Archive workspace" %s / "Restore workspace" %s' %
-          (arch_chord.strip() or "(palette only)", rest_chord.strip() or "(palette only)"))
+    print('palette:  "Archive workspace" %s / "Archive session" %s / "Restore archive" %s'
+          % (arch_chord.strip() or "(palette only)", sess_chord.strip() or "(palette only)",
+             rest_chord.strip() or "(palette only)"))
     return 0
 
 
@@ -404,11 +515,11 @@ def cmd_uninstall(args):
 
 
 def cmd_drop(args):
-    path = archive_path(args.name)
-    if not os.path.exists(path):
+    kind, label, path, _ = resolve_archive(args.name)
+    if not path:
         die("no archive named %r" % args.name)
     os.remove(path)
-    print("dropped %s" % path)
+    print("dropped %s archive %s (%s)" % (kind, label, path))
     return 0
 
 
@@ -423,10 +534,16 @@ def main():
     a.add_argument("--force", action="store_true", help="overwrite an existing archive")
     a.set_defaults(fn=cmd_archive)
 
-    l = sub.add_parser("list", help="list archived workspaces")
+    ss = sub.add_parser("session", help="snapshot a single session and close it")
+    ss.add_argument("session", nargs="?", help="session id/prefix or name (default: active)")
+    ss.add_argument("--keep", action="store_true", help="snapshot without closing")
+    ss.add_argument("--force", action="store_true", help="overwrite an existing archive")
+    ss.set_defaults(fn=cmd_archive_session)
+
+    l = sub.add_parser("list", help="list archived workspaces and sessions")
     l.set_defaults(fn=cmd_list)
 
-    r = sub.add_parser("restore", help="recreate an archived workspace")
+    r = sub.add_parser("restore", help="recreate an archived workspace or session")
     r.add_argument("name")
     r.add_argument("--no-boot", action="store_true", help="recreate shells, skip claude")
     r.add_argument("--keep", action="store_true", help="keep the archive file after restoring")
@@ -438,6 +555,7 @@ def main():
 
     i = sub.add_parser("install", help="wire the archive/restore custom commands")
     i.add_argument("--archive-chord", help="chord for Archive workspace (default: ctrl+a>a)")
+    i.add_argument("--session-chord", help="chord for Archive session (default: ctrl+a>s)")
     i.add_argument("--restore-chord", help="chord for Restore workspace (default: ctrl+a>r)")
     i.add_argument("--no-chord", action="store_true", help="palette-only, no key bindings")
     i.set_defaults(fn=cmd_install)

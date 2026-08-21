@@ -169,14 +169,18 @@ workspace. Later, `restore` recreates the whole thing and resumes every agent (C
 or Codex) where it left off.
 
 ```bash
-agterm-archive archive beware-of-skills
+agterm-archive archive beware-of-skills   # a whole workspace
+agterm-archive session                    # just one session out of it
 agterm-archive list
 agterm-archive restore beware-of-skills
-agterm-archive install       # palette: "Archive workspace" (ctrl+a>a), "Restore workspace" (ctrl+a>r)
+agterm-archive install    # palette: Archive workspace (ctrl+a>a), Archive session (ctrl+a>s),
+                          #          Restore archive (ctrl+a>r)
 ```
 
-The restore entry lists your archives in agterm's native fuzzy picker, so parking and
-un-parking a project never needs a Claude session at all.
+A single session can be parked on its own — it remembers which workspace it came from and
+goes back there, recreating the workspace if it is gone. The restore entry lists both kinds
+in agterm's native fuzzy picker, so parking and un-parking never needs a Claude session at
+all.
 
 For projects that are done for now but not done for good, and shouldn't sit in your sidebar
 in the meantime. Complements `agterm-backup` rather than overlapping it: backup covers what
