@@ -20,9 +20,70 @@ Contract:
 """
 import sys
 import os
+import re
 import json
 import time
+import shlex
 import tempfile
+import subprocess
+
+UUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+                     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+
+
+def norm_flags(argv, agent):
+    """argv after the binary, minus anything that re-enters an existing session.
+    restore supplies its own --resume; a leftover one would win and resume the
+    wrong session."""
+    out, skip = [], False
+    for a in argv:
+        if skip:
+            skip = False
+            continue
+        if agent == "codex":
+            if a in ("resume", "fork", "--last") or UUID_RE.fullmatch(a):
+                continue
+        else:
+            if a in ("--resume", "-r"):
+                skip = True
+                continue
+            if a.startswith("--resume=") or a.startswith("-r="):
+                continue
+            if a in ("--continue", "-c", "--fork-session"):
+                continue
+        out.append(a)
+    return out
+
+
+def agent_argv(agent):
+    """The launch argv of the agent process this hook was spawned from. Walked up
+    the process tree: a hook may run under an intermediate shell. ps joins argv
+    with spaces, so an argument containing one is not recovered faithfully — flags
+    do not have any."""
+    pid = os.getppid()
+    for _ in range(6):
+        if pid <= 1:
+            return []
+        try:
+            out = subprocess.run(["ps", "-o", "ppid=,args=", "-p", str(pid)],
+                                 capture_output=True, text=True, timeout=5).stdout.strip()
+        except Exception:
+            return []
+        if not out:
+            return []
+        head, _, rest = out.partition(" ")
+        try:
+            ppid = int(head)
+        except ValueError:
+            return []
+        try:
+            argv = shlex.split(rest)
+        except ValueError:
+            argv = rest.split()
+        if argv and os.path.basename(argv[0]) == agent:
+            return argv
+        pid = ppid
+    return []
 
 
 def main() -> None:
@@ -50,8 +111,26 @@ def main() -> None:
     # or the two would clobber each other.
     role = os.environ.get("AGTERM_PANE") or "left"
 
+    agent = sys.argv[1] if len(sys.argv) > 1 else "claude"
+    target = os.path.join(live_dir, pane + "-" + role + ".json")
+
+    # The ps walk costs a few forks, so only pay it when the answer can have
+    # changed: a fresh session, or a record that predates flag capture.
+    prev = {}
+    try:
+        with open(target) as fh:
+            prev = json.load(fh)
+    except Exception:
+        pass
+    event = data.get("source") or data.get("hook_event_name") or ""
+    if event == "SessionStart" or prev.get("agent") != agent or "resume_flags" not in prev:
+        flags = norm_flags(agent_argv(agent)[1:], agent)
+    else:
+        flags = prev.get("resume_flags") or []
+
     record = {
-        "agent": (sys.argv[1] if len(sys.argv) > 1 else "claude"),
+        "agent": agent,
+        "resume_flags": flags,
         "pane_uuid": pane,
         "workspace_id": os.environ.get("AGTERM_WORKSPACE_ID") or None,
         "window_id": os.environ.get("AGTERM_WINDOW_ID") or None,
@@ -59,11 +138,10 @@ def main() -> None:
         "claude_session_id": sid,
         "transcript_path": data.get("transcript_path") or "",
         "cwd": data.get("cwd") or "",
-        "source": data.get("source") or data.get("hook_event_name") or "",
+        "source": event,
         "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
 
-    target = os.path.join(live_dir, pane + "-" + role + ".json")
     try:
         fd, tmp = tempfile.mkstemp(dir=live_dir, prefix=".tmp-")
         with os.fdopen(fd, "w") as fh:

@@ -44,50 +44,77 @@ resumed with the wrong one.
 
 ## The command
 
-`~/.claude/skills/agterm-backup/agterm-backup` (run with `/usr/bin/python3` or directly):
+`agterm-backup` — `install` symlinks it into `~/.local/bin`; it also runs directly from
+the skill directory:
 
 ```
 agterm-backup install            # wire the capture hook into ~/.claude/settings.json + make state dirs
 agterm-backup status             # coverage: which running claude panes are captured
-agterm-backup snap [--harvest]   # freeze the pane->session-id map + topology to a snapshot
-agterm-backup restore [--dry-run] [--yes] [--from-live]   # after restart: type claude --resume into each pane
+agterm-backup restore [--dry-run] [--yes]   # after restart: resume every captured session in its pane
+agterm-backup snap [--harvest]   # optional: freeze a snapshot (see "The snapshot is optional")
 ```
 
 State lives in `~/.agterm-backup/` (`live/` = per-pane hook captures, `snapshots/` =
 frozen backups, `snapshot.json` = latest).
 
-## Capture, two ways
+## Capture
 
-- **Durable (hooks):** `install` registers `capture.py` on SessionStart /
-  UserPromptSubmit / PreToolUse / Stop. Every session then records
-  `AGTERM_SESSION_ID -> claude session_id` into `live/<pane>-<role>.json` on its own
-  events. Zero interaction, no injection. This is the permanent solution — future
-  reboots need only `snap` then `restore`.
-- **Scrollback (one-shot bonus):** `snap --harvest` reads a pane's scrollback for a
-  `Session ID: <uuid>` line (printed by `/status`) and accepts it only if a matching
-  transcript exists. Fills gaps for sessions that were running before the hook and are
-  idle. A split pane's second claude shares the session's `AGTERM_SESSION_ID`; live
-  files are keyed by pane role (`left`/`right`) so they don't collide.
+`install` registers `capture.py` on SessionStart / UserPromptSubmit / PreToolUse /
+Stop. Every session then records, into `live/<pane>-<role>.json` on its own events:
+
+- `AGTERM_SESSION_ID -> agent session_id` — the join key,
+- the agent's **launch flags** (`--dangerously-skip-permissions`, `--model sonnet`, …),
+  read off the agent process's argv by walking up from the hook.
+
+Zero interaction, no injection, and it is written continuously — so a crash with no
+warning costs nothing. A split pane's second agent shares the session's
+`AGTERM_SESSION_ID`; live files are keyed by pane role (`left`/`right`) so they don't
+collide.
+
+Flags matter as much as the id: a session that comes back without the flag it was
+launched with is not the session you had.
 
 ## Reboot workflow (the main use case)
 
 1. `agterm-backup install` (once).
-2. Let each session tick, or run `/status` in idle claude panes. Check with
-   `agterm-backup status` until coverage is complete (or accept the misses it lists).
-3. `agterm-backup snap --harvest` — freeze the map.
-4. Reboot / update agterm.
-5. When agterm is back (panes restored as shells, same UUIDs):
-   `agterm-backup restore --dry-run` to review, then `agterm-backup restore`.
-   It matches each saved pane by UUID and types `claude --resume <id> <flags>` into
-   it, skipping panes that aren't present or already have claude running.
+2. Reboot / update agterm.
+3. `agterm-backup restore --dry-run` to review, then `agterm-backup restore`.
+
+That is the whole procedure. There is nothing to remember to do *before* the reboot,
+which is the point: the moment you need this skill is usually the moment you did not
+get to prepare for it.
+
+`restore` reads the live captures, joins them to the tree as it stands now by pane
+UUID, and types the resume line into every pane that is sitting at a shell. It skips a
+pane that already has an agent running (so re-running it is safe), one whose transcript
+is gone from disk, and one whose pane no longer exists.
+
+## The snapshot is optional
+
+`snap` freezes the current map plus the full topology into `snapshots/`. `restore` does
+**not** need it and a snapshot id **never** overrides a live one — a stale snapshot
+resuming week-old sessions is the exact failure this design avoids. It is still worth
+having for two things:
+
+- `snap --harvest` reads a pane's scrollback for a `Session ID: <uuid>` line (printed by
+  `/status`) and accepts it only if a matching transcript exists — which recovers a
+  session that was running before the hook existed;
+- it records the launch flags of every running agent, which fills them in for live
+  records written before `capture.py` learned to capture them.
 
 ## Notes
 
 - `restore` only injects into a pane sitting at a shell prompt; a pane already running
-  claude is skipped (so re-running restore is safe).
-- Preserved flags (e.g. `--dangerously-skip-permissions`) are read from each pane's
-  live foreground argv at `snap` time and re-applied on resume.
+  an agent is skipped (so re-running restore is safe). agterm's own "restore running
+  commands" setting may beat it to the punch — then every pane reports as skipped and
+  there is nothing to do.
+- Anything that re-enters an existing session (`--resume`/`-r` with its id, `--continue`,
+  `--fork-session`; codex's `resume`/`fork`/`--last`) is stripped from the recorded
+  flags. It has to be: `restore` supplies its own `--resume`, claude honours the LAST
+  one, and a leftover would silently resume a different session.
+- `--from-live` is accepted and ignored; it is the default behaviour now.
 - On a newer agterm (v0.16+), the first-party `agtermctl session restore "<cmd>"`
-  per-session override can replace step 5 entirely from within the SessionStart hook;
+  per-session override can replace the restore step entirely from within the
+  SessionStart hook;
   this skill targets the installed build and stays version-independent by typing into
   the restored shell.

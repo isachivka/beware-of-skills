@@ -21,7 +21,7 @@ Commands:
     agterm-backup install [--python PATH]
     agterm-backup status
     agterm-backup snap [--harvest]
-    agterm-backup restore [--dry-run] [--yes] [--from-live]
+    agterm-backup restore [--dry-run] [--yes]
 """
 import sys
 import os
@@ -42,7 +42,10 @@ CODEX_CONFIG = os.path.join(HOME, ".codex", "config.toml")
 CODEX_BEGIN = "# >>> agterm-backup capture hook (managed) >>>"
 CODEX_END = "# <<< agterm-backup capture hook <<<"
 AGENTS = ("claude", "codex")
-SKILL_DIR = os.path.dirname(os.path.abspath(__file__))
+# realpath, not abspath: the command is normally invoked through the ~/.local/bin
+# symlink, and abspath would resolve the skill directory to ~/.local/bin — where
+# capture.py does not exist, quietly wiring the hooks to a missing file.
+SKILL_DIR = os.path.dirname(os.path.realpath(__file__))
 CAPTURE = os.path.join(SKILL_DIR, "capture.py")
 PROJECTS = os.path.join(HOME, ".claude", "projects")
 
@@ -115,33 +118,36 @@ def all_panes(tree):
     return out
 
 
-def _flags(argv, agent="claude"):
-    """argv after the binary, dropping whatever re-enters an existing session:
-    claude's --resume/-r <id>, --continue, --fork-session; codex's `resume`/`fork`
-    subcommand with its id, and --last."""
-    rest = list(argv[1:])
+def norm_flags(flags, agent="claude"):
+    """Flags minus anything that re-enters an existing session: claude's
+    --resume/-r <id> (attached form included), --continue, --fork-session; codex's
+    `resume`/`fork` subcommand with its id, and --last. restore supplies its own
+    --resume, and claude honours the LAST one — a leftover would resume the wrong
+    session, silently."""
     out = []
     skip = False
-    for i, a in enumerate(rest):
+    for a in flags or []:
         if skip:
             skip = False
             continue
         if agent == "codex":
-            if i == 0 and a in ("resume", "fork"):
+            if a in ("resume", "fork", "--last") or UUID_RE.fullmatch(a):
                 continue
-            if a == "--last":
+        else:
+            if a in ("--resume", "-r"):
+                skip = True
                 continue
-            if UUID_RE.fullmatch(a):
+            if a.startswith("--resume=") or a.startswith("-r="):
                 continue
-            out.append(a)
-            continue
-        if a in ("--resume", "-r"):
-            skip = True
-            continue
-        if a in ("--continue", "-c", "--fork-session"):
-            continue
+            if a in ("--continue", "-c", "--fork-session"):
+                continue
         out.append(a)
     return out
+
+
+def _flags(argv, agent="claude"):
+    """The launch flags of a running agent, from its argv."""
+    return norm_flags(list(argv[1:]), agent)
 
 
 def live_for(live, pid, role, agent):
@@ -257,11 +263,34 @@ def cmd_install(args):
         print("claude capture hook already installed on all events")
     print("command: %s" % command)
     _install_codex_hooks(py)
+    _link_onto_path()
     print("\nNOTE: the hook fires on a session's NEXT event. Already-running "
           "sessions are captured when they next act (a prompt, a tool call, a turn "
           "end). Run 'agterm-backup status' to see coverage; 'agterm-backup snap' "
           "to also harvest ids from /status scrollback.")
     return 0
+
+
+def _link_onto_path():
+    """Put the command on PATH. It lives inside the skill directory, which nothing
+    searches — and the one moment you reach for it is the moment after a crash, with
+    no patience for hunting down a path."""
+    target = os.path.join(HOME, ".local", "bin", "agterm-backup")
+    src = os.path.join(SKILL_DIR, "agterm-backup")
+    try:
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        if os.path.islink(target) and os.path.realpath(target) == os.path.realpath(src):
+            return
+        if os.path.exists(target) and not os.path.islink(target):
+            print("~/.local/bin/agterm-backup exists and is not a symlink — left alone")
+            return
+        if os.path.islink(target):
+            os.unlink(target)
+        # a symlink, not a copy: edits to the skill take effect with no reinstall
+        os.symlink(src, target)
+        print("linked %s -> %s" % (target, src))
+    except Exception as e:
+        print("could not link onto PATH (%s); run it by full path" % e)
 
 
 def _codex_block(py):
@@ -438,84 +467,152 @@ def _prune_snapshots(keep=20):
 
 # -------------------------------------------------------------------------- restore
 
-def cmd_restore(args):
-    if args.from_live:
-        tree = load_tree()
-        live = read_live()
-        panes = []
-        for pid, role, cwd, wsname, title, flags, agent in iter_agent_panes(tree):
-            rec = live_for(live, pid, role, agent)
-            panes.append({
-                "pane_uuid": pid, "pane_role": role, "cwd": cwd,
-                "workspace_name": wsname, "session_title": title,
-                "resume_flags": flags, "agent": agent,
-                "claude_session_id": rec["claude_session_id"] if rec else None,
-                "id_source": "hook" if rec else None,
-            })
-        snap = {"panes": panes}
-    else:
-        if not os.path.exists(LATEST):
-            print("no snapshot yet — run 'agterm-backup snap' first (or use --from-live)")
-            return 1
-        with open(LATEST) as fh:
-            snap = json.load(fh)
+def _tree_panes(tree):
+    """(pane_uuid, role) -> {workspace_name, title, cwd, foreground} for the tree as
+    it stands right now."""
+    out = {}
+    for ws in tree.get("workspaces", []):
+        for sn in ws.get("sessions", []):
+            pid = (sn.get("id") or "").upper()
+            out[(pid, "left")] = {
+                "workspace_name": ws.get("name"), "title": sn.get("title") or "",
+                "cwd": sn.get("cwd") or "", "foreground": sn.get("foreground") or [],
+            }
+            if sn.get("split"):
+                out[(pid, "right")] = {
+                    "workspace_name": ws.get("name"), "title": sn.get("title") or "",
+                    "cwd": sn.get("splitCwd") or sn.get("cwd") or "",
+                    "foreground": sn.get("splitForeground") or [],
+                }
+    return out
 
+
+def collect_records():
+    """(pane_uuid, role) -> what to resume there.
+
+    The hook captures are the source of truth: they are written continuously, so
+    they survive a crash with no warning and no `snap`. The saved snapshot only
+    fills gaps — panes it harvested from scrollback, and flags for records written
+    before capture.py recorded them. A snapshot id NEVER overrides a live one; a
+    stale snapshot resuming week-old sessions is exactly the failure this avoids."""
+    recs = {}
+    for (pid, role), r in read_live().items():
+        agent = r.get("agent") or "claude"
+        recs[(pid, role)] = {
+            "pane_uuid": pid, "pane_role": role, "agent": agent,
+            "claude_session_id": r.get("claude_session_id"),
+            "transcript_path": r.get("transcript_path") or "",
+            "cwd": r.get("cwd") or "",
+            "resume_flags": norm_flags(r.get("resume_flags") or [], agent),
+            "ts": r.get("ts") or "", "id_source": "hook",
+        }
+
+    if os.path.exists(LATEST):
+        try:
+            with open(LATEST) as fh:
+                snap = json.load(fh)
+        except Exception:
+            snap = {"panes": []}
+        for p in snap.get("panes", []):
+            key = ((p.get("pane_uuid") or "").upper(), p.get("pane_role") or "left")
+            agent = p.get("agent") or "claude"
+            flags = norm_flags(p.get("resume_flags") or [], agent)
+            cur = recs.get(key)
+            if cur is None:
+                if not p.get("claude_session_id"):
+                    continue
+                recs[key] = {
+                    "pane_uuid": key[0], "pane_role": key[1], "agent": agent,
+                    "claude_session_id": p["claude_session_id"],
+                    "transcript_path": "", "cwd": p.get("cwd") or "",
+                    "resume_flags": flags, "ts": snap.get("ts") or "",
+                    "id_source": p.get("id_source") or "snapshot",
+                }
+            elif not cur["resume_flags"] and flags and cur["agent"] == agent:
+                cur["resume_flags"] = flags
+    return recs
+
+
+def cmd_restore(args):
+    if getattr(args, "from_live", False):
+        print("note: --from-live is the default now; the flag does nothing.\n")
+
+    recs = collect_records()
     tree = load_tree()
-    live_panes = all_panes(tree)  # (pid, role) -> current foreground argv
+    panes = _tree_panes(tree)
 
     plan = []
-    for p in snap["panes"]:
-        sid = p.get("claude_session_id")
+    for key, r in recs.items():
+        meta = panes.get(key)
+        if meta is None:
+            plan.append((r, None, None, "SKIP: pane no longer in the tree"))
+            continue
+        sid = r.get("claude_session_id")
         if not sid:
-            plan.append((p, None, "SKIP: no session id captured"))
+            plan.append((r, meta, None, "SKIP: no session id captured"))
             continue
-        key = (p["pane_uuid"].upper(), p.get("pane_role") or "left")
-        if key not in live_panes:
-            plan.append((p, None, "SKIP: pane not present after restart"))
-            continue
-        fg = live_panes[key]
+        fg = meta["foreground"]
         if fg and os.path.basename(fg[0]) in AGENTS:
-            plan.append((p, None, "SKIP: %s already running in this pane"
-                         % os.path.basename(fg[0])))
+            plan.append((r, meta, None,
+                         "SKIP: %s already running here" % os.path.basename(fg[0])))
             continue
-        cmd = resume_cmd(p.get("agent") or "claude", sid, p.get("resume_flags") or [])
-        plan.append((p, cmd, "inject"))
+        tp = r.get("transcript_path")
+        if tp and not os.path.exists(tp):
+            plan.append((r, meta, None, "SKIP: transcript gone from disk"))
+            continue
+        plan.append((r, meta, resume_cmd(r["agent"], sid, r["resume_flags"]), "inject"))
 
-    print("Restore plan (%d agent pane(s)):\n" % len(snap["panes"]))
-    inject = []
-    for p, cmd, note in plan:
-        tag = "%s/%s" % (p.get("workspace_name") or "?", p["pane_uuid"][:8])
-        if cmd:
-            print("  [inject] %-16s %-6s %s" % (tag, p.get("pane_role"), cmd))
-            inject.append((p, cmd))
-        else:
-            print("  [ skip ] %-16s %-6s %s" % (tag, p.get("pane_role"), note))
+    def label(r, meta):
+        ws = (meta or {}).get("workspace_name") or "?"
+        title = (meta or {}).get("title") or ""
+        return "%s/%s" % (ws, title[:34] or r["pane_uuid"][:8])
+
+    plan.sort(key=lambda e: (label(e[0], e[1]).lower(), e[0]["pane_role"]))
+    inject = [(r, meta, cmd) for r, meta, cmd, note in plan if cmd]
+    # A pane that no longer exists is the normal residue of closed sessions, not a
+    # problem to read through: live records outlive their panes (and an archived
+    # workspace can bring one back), so they are counted, not listed.
+    gone = sum(1 for r, meta, cmd, note in plan if meta is None)
+    skipped = [(r, meta, note) for r, meta, cmd, note in plan
+               if not cmd and meta is not None]
+
+    print("Restore plan — %d to resume, %d skipped:\n" % (len(inject), len(skipped)))
+    for r, meta, cmd in inject:
+        print("  [resume] %-42s %-5s %s" % (label(r, meta), r["pane_role"], cmd))
+    if skipped:
+        print("")
+        for r, meta, note in skipped:
+            print("  [ skip ] %-42s %-5s %s" % (label(r, meta), r["pane_role"], note))
+    if gone:
+        print("\n  (%d record(s) for panes that no longer exist — ignored)" % gone)
 
     if args.dry_run:
         print("\n--dry-run: nothing typed.")
         return 0
     if not inject:
-        print("\nnothing to inject.")
+        print("\nnothing to resume.")
         return 0
     if not args.yes:
         try:
-            ans = input("\nInject %d resume command(s)? [y/N] " % len(inject))
+            ans = input("\nResume %d session(s)? [y/N] " % len(inject))
         except EOFError:
             ans = ""
         if ans.strip().lower() not in ("y", "yes"):
             print("aborted.")
             return 0
 
-    for p, cmd in inject:
-        typ = ["agtermctl", "session", "type", cmd + "\n",
-               "--target", p["pane_uuid"]]
-        if (p.get("pane_role") or "left") == "right":
+    failed = 0
+    for r, meta, cmd in inject:
+        typ = ["agtermctl", "session", "type", cmd + "\n", "--target", r["pane_uuid"]]
+        if r["pane_role"] == "right":
             typ += ["--pane", "right"]
         try:
-            subprocess.run(typ, timeout=15)
+            subprocess.run(typ, timeout=15, check=True)
         except Exception as e:
-            print("  failed on %s: %s" % (p["pane_uuid"][:8], e))
-    print("done: injected %d." % len(inject))
+            failed += 1
+            print("  failed on %s: %s" % (label(r, meta), e))
+    print("done: resumed %d%s." % (len(inject) - failed,
+                                   (", %d failed" % failed) if failed else ""))
     return 0
 
 
@@ -537,11 +634,10 @@ def main():
                     help="also try to read ids from /status scrollback for uncaptured panes")
     pn.set_defaults(func=cmd_snap)
 
-    pr = sub.add_parser("restore", help="type 'claude --resume <id>' into restored panes")
+    pr = sub.add_parser("restore", help="resume every captured session in its pane")
     pr.add_argument("--dry-run", action="store_true")
     pr.add_argument("--yes", action="store_true")
-    pr.add_argument("--from-live", action="store_true",
-                    help="use live/ + current tree instead of the saved snapshot")
+    pr.add_argument("--from-live", action="store_true", help=argparse.SUPPRESS)
     pr.set_defaults(func=cmd_restore)
 
     args = ap.parse_args()
