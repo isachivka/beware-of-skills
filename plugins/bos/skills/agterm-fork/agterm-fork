@@ -139,7 +139,8 @@ def _answer_resume_prompt(sid, timeout=240, choice="2"):
         out = subprocess.run(["agtermctl", "session", "text", "--target", sid],
                              capture_output=True, text=True)
         text = out.stdout if out.returncode == 0 else ""
-        if "Resume full session as-is" in text and "Enter to confirm" in text:
+        tail = "\n".join((text or "").rstrip().splitlines()[-14:])
+        if "Resume full session as-is" in tail and "Enter to confirm" in tail:
             agtermctl("session", "type", "--target", sid, choice + "\n")
             print("  answered the resume prompt with %r" % choice)
             return True

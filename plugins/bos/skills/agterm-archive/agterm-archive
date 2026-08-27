@@ -431,6 +431,16 @@ def _pane_text(target, pane):
     return out.stdout if out.returncode == 0 else ""
 
 
+def _waiting_on_prompt(text):
+    """True only when the prompt is live at the bottom of the screen. Matching anywhere
+    in the buffer is not enough: a pane that merely *talks about* the dialog (an agent
+    quoting it) would be answered, typing a stray "2" into someone's session."""
+    tail = "\n".join((text or "").rstrip().splitlines()[-14:])
+    return (RESUME_PROMPT in tail
+            and "Enter to confirm" in tail
+            and "Resume from summary" in tail)
+
+
 def answer_resume_prompts(targets, timeout=180, choice="2", quiet=False):
     """A resumed claude asks whether to replay the full session or a summary, and sits
     there until answered. Boot can take a minute, so poll rather than sleep-and-hope.
@@ -446,7 +456,7 @@ def answer_resume_prompts(targets, timeout=180, choice="2", quiet=False):
             text = _pane_text(sid, pane)
             if not text:
                 continue
-            if RESUME_PROMPT in text and "Enter to confirm" in text:
+            if _waiting_on_prompt(text):
                 agtermctl("session", "type", "--target", sid, "--pane", pane,
                           choice + "\n", check=False)
                 pending.remove(item)

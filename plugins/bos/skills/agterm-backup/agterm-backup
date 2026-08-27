@@ -360,6 +360,16 @@ def _pane_text(target, pane):
     return out.stdout if out.returncode == 0 else ""
 
 
+def _waiting_on_prompt(text):
+    """True only when the prompt is live at the bottom of the screen. Matching anywhere
+    in the buffer is not enough: a pane that merely *talks about* the dialog (an agent
+    quoting it) would be answered, typing a stray "2" into someone's session."""
+    tail = "\n".join((text or "").rstrip().splitlines()[-14:])
+    return (RESUME_PROMPT in tail
+            and "Enter to confirm" in tail
+            and "Resume from summary" in tail)
+
+
 def answer_resume_prompts(targets, timeout=180, choice="2", quiet=False):
     """A resumed claude asks whether to replay the full session or a summary, and sits
     there until answered. Boot can take a minute, so poll rather than sleep-and-hope.
@@ -375,9 +385,9 @@ def answer_resume_prompts(targets, timeout=180, choice="2", quiet=False):
             text = _pane_text(sid, pane)
             if not text:
                 continue
-            if RESUME_PROMPT in text and "Enter to confirm" in text:
+            if _waiting_on_prompt(text):
                 agtermctl("session", "type", "--target", sid, "--pane", pane,
-                          choice + "\n", check=False)
+                          choice + "\n")
                 pending.remove(item)
                 answered += 1
                 if not quiet:
@@ -693,8 +703,11 @@ def cmd_answer(args):
     if args.target:
         want = args.target.upper()
         targets = [t for t in targets if t[0].startswith(want)]
+    me = (os.environ.get("AGTERM_SESSION_ID") or "").upper()
+    mine = (os.environ.get("AGTERM_PANE") or "left")
     waiting = [(sid, pane) for sid, pane in targets
-               if RESUME_PROMPT in _pane_text(sid, pane)]
+               if not (sid.upper() == me and pane == mine)
+               and _waiting_on_prompt(_pane_text(sid, pane))]
     print("claude panes: %d, sitting on the resume prompt: %d" % (len(targets), len(waiting)))
     if not waiting:
         return 0
