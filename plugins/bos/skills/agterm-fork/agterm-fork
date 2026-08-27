@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 HOME = os.path.expanduser("~")
 LIVE_DIR = os.path.join(HOME, ".agterm-backup", "live")
@@ -82,6 +83,18 @@ def strip_resume(argv, agent="claude"):
         if a in ("--continue", "-c", "--fork-session"):
             continue
         out.append(a)
+    return _dedupe(out)
+
+
+def _dedupe(flags):
+    """A pane can carry the same flag twice (a hand-typed resume on top of the original
+    launch); do not pass that on."""
+    seen, out = set(), []
+    for f in flags:
+        if f.startswith("-") and f in seen:
+            continue
+        seen.add(f)
+        out.append(f)
     return out
 
 
@@ -115,6 +128,24 @@ def live_id(pane_id, role, agent):
     if (rec.get("agent") or "claude") != agent:
         return None
     return rec.get("claude_session_id")
+
+
+def _answer_resume_prompt(sid, timeout=240, choice="2"):
+    """A resumed claude asks full-session-vs-summary before it reaches its prompt.
+    Boot takes up to a minute, so poll instead of sleeping blind."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        time.sleep(3)
+        out = subprocess.run(["agtermctl", "session", "text", "--target", sid],
+                             capture_output=True, text=True)
+        text = out.stdout if out.returncode == 0 else ""
+        if "Resume full session as-is" in text and "Enter to confirm" in text:
+            agtermctl("session", "type", "--target", sid, choice + "\n")
+            print("  answered the resume prompt with %r" % choice)
+            return True
+        if "esc to interrupt" in text or "\u276f " in text:
+            return False
+    return False
 
 
 def cmd_fork(args):
@@ -163,6 +194,8 @@ def cmd_fork(args):
 
     cmd = fork_cmd(agent, sid, flags)
     agtermctl("session", "type", "--target", new_id, cmd + "\n")
+    if agent == "claude" and not args.no_answer:
+        _answer_resume_prompt(new_id, args.answer_timeout, args.answer_choice)
 
     print("forked %s/%s -> %s" % (s.get("name") or pane_id[:8], role, name))
     print("  workspace: %s" % (ws.get("name") or "?"))
@@ -243,6 +276,11 @@ def main():
     f.add_argument("role", nargs="?", help="pane role: left|right (default: current)")
     f.add_argument("--name", help="name for the new session")
     f.add_argument("--dry-run", action="store_true", help="print the plan, create nothing")
+    f.add_argument("--no-answer", action="store_true",
+                   help="leave claude's resume prompt for you to answer")
+    f.add_argument("--answer-choice", default="2",
+                   help="2 = resume full session as-is (default), 1 = from summary")
+    f.add_argument("--answer-timeout", type=int, default=240)
     f.set_defaults(fn=cmd_fork)
 
     i = sub.add_parser("install", help='wire the "Fork session" custom command')

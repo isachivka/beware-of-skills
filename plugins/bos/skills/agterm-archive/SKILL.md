@@ -53,6 +53,9 @@ Workspace archives live in `~/.agterm-backup/archives/<name>.json`, single sessi
   pane that had one. `--no-boot` leaves plain shells; `--keep` keeps the archive file
   (otherwise a successful restore consumes it); `--force` restores into an already-open
   workspace.
+- After booting a claude, `restore` waits for its "resume full session as-is / from
+  summary" question and answers **2** (full session) — the same reason you restored it.
+  `--answer-choice 1` / `--no-answer` change that.
 - Non-claude panes come back as shells in the right cwd. Whatever process they ran is gone —
   a snapshot is not a checkpoint.
 

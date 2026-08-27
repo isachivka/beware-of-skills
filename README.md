@@ -14,6 +14,20 @@ This repo is a Claude Code plugin marketplace with two plugins: **bos** (the gen
 
 Skills then invoke as `/bos:<skill>`, e.g. `/bos:agent-pm`. `/plugin update` keeps them current.
 
+### Codex
+
+The same two plugins ship a Codex manifest (`.codex-plugin/plugin.json`) and a Codex marketplace
+(`.agents/plugins/marketplace.json`), so Codex CLI can install them from a local clone:
+
+```
+git clone https://github.com/isachivka/beware-of-skills.git
+codex plugin marketplace add ./beware-of-skills
+codex plugin add bos@beware-of-skills
+```
+
+Codex copies the plugin into its own cache on install, so after editing or adding a skill in the
+clone, re-run `codex plugin add bos@beware-of-skills` and start a new thread to pick it up.
+
 ## Skills — `bos`
 
 ### flow-recorder
@@ -155,6 +169,9 @@ install` runs as-is once the plugin is installed.
 can fork whatever session the cursor is on without going through Claude at all. The wrapper
 resolves the newest installed copy of the skill at call time — plugin cache paths carry a
 commit sha and would otherwise break on every update.
+
+A resumed claude first asks whether to replay the full session or just a summary; the fork
+answers "full session" for you, after waiting out the boot.
 
 Works only inside agterm, and only alongside `agterm-backup`: a session cannot know its own
 claude id, so it is read from the live record that skill's hook writes.

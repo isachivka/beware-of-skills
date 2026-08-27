@@ -36,7 +36,9 @@ The plugin's `bin/` is on `PATH` inside a Claude Code session, so run it by name
 4. `agtermctl session new --after <pane>` — the anchor carries the workspace, so the fork
    lands next to its parent — then types `claude --resume <id> --fork-session <flags>` or,
    for codex, `codex fork <id> <flags>` (codex forks natively).
-5. Stops there. **The fork gets no task**; the user opens it and drives it.
+5. Waits for claude's "resume full session as-is / from summary" question and answers
+   **2**, so the fork really carries the whole history (`--no-answer` to skip).
+6. Stops there. **The fork gets no task**; the user opens it and drives it.
 
 `install` writes `~/.local/bin/agterm-fork` and a managed block in
 `~/.config/agterm/keymap.conf`:

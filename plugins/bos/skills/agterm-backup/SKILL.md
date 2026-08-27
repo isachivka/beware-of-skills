@@ -42,6 +42,24 @@ resumed with the wrong one.
   receives the exact `session_id` on stdin. Claude Code re-reads hooks per event, so
   a newly-installed hook captures **already-running** sessions on their next activity.
 
+## The resume prompt
+
+A resumed claude does not go straight back to work: for an old or large session it asks
+
+```
+This session is 3d 12h old and 483.9k tokens.
+  1. Resume from summary (recommended)
+  2. Resume full session as-is
+  3. Don't ask me again
+```
+
+and sits there. `restore` therefore watches the panes it typed into (claude can take a
+minute to boot) and answers **2 — resume full session as-is**, which is the point of a
+restore. `--answer-choice 1` picks the summary instead, `--no-answer` leaves it alone.
+
+`agterm-backup answer` does the same for panes already waiting — after a manual
+`claude --resume`, or a restore run with `--no-answer`. `--dry-run` lists them first.
+
 ## The command
 
 `agterm-backup` — `install` symlinks it into `~/.local/bin`; it also runs directly from

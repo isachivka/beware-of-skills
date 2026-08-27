@@ -95,6 +95,18 @@ def strip_resume(argv, agent="claude"):
         if a in ("--continue", "-c", "--fork-session"):
             continue
         out.append(a)
+    return _dedupe(out)
+
+
+def _dedupe(flags):
+    """A pane can carry the same flag twice (a hand-typed resume on top of the original
+    launch); do not pass that on."""
+    seen, out = set(), []
+    for f in flags:
+        if f.startswith("-") and f in seen:
+            continue
+        seen.add(f)
+        out.append(f)
     return out
 
 
@@ -159,8 +171,10 @@ def snap_session(s):
     return rec
 
 
-def restore_session(s, wsname, no_boot=False, after=None):
-    """Recreate one archived session in `wsname` and boot its agents."""
+def restore_session(s, wsname, no_boot=False, after=None, booted=None):
+    """Recreate one archived session in `wsname` and boot its agents. Pane ids that got
+    a claude booted into them are appended to `booted` (they may need the resume prompt
+    answered)."""
     cmd = ["session", "new", "--workspace-name", wsname, "--create-workspace",
            "--cwd", s["cwd"], "--name", s.get("name") or "", "--no-select", "--json"]
     if after:
@@ -187,9 +201,11 @@ def restore_session(s, wsname, no_boot=False, after=None):
                           p.get("flags", []))
         if p["role"] == "right" and p.get("cwd") and p["cwd"] != s["cwd"]:
             line = "cd %s && %s" % (p["cwd"], line)
-        agtermctl("session", "type", "--target", sid,
-                  "--pane", "right" if p["role"] == "right" else "left", line + "\n")
+        pane = "right" if p["role"] == "right" else "left"
+        agtermctl("session", "type", "--target", sid, "--pane", pane, line + "\n")
         print("      %-8s %s" % (p["role"], line))
+        if booted is not None and (p.get("agent") or "claude") == "claude":
+            booted.append((sid, pane))
     return sid
 
 
@@ -371,7 +387,9 @@ def cmd_restore(args):
         sess = snap["session"]
         print("restoring session %r into %r%s"
               % (sess.get("name"), wsname, " (--no-boot)" if args.no_boot else ""))
-        restore_session(sess, wsname, no_boot=args.no_boot)
+        booted = []
+        restore_session(sess, wsname, no_boot=args.no_boot, booted=booted)
+        _answer(booted, args)
         log("restored session %r / %r" % (wsname, sess.get("name")))
         print("\nDone. The session is live again, so agterm-backup covers it from here on.")
         if not args.keep:
@@ -385,8 +403,10 @@ def cmd_restore(args):
 
     print("restoring %r: %d session(s)%s" %
           (wsname, len(snap["sessions"]), "" if not args.no_boot else " (--no-boot)"))
+    booted = []
     for s in snap["sessions"]:
-        restore_session(s, wsname, no_boot=args.no_boot)
+        restore_session(s, wsname, no_boot=args.no_boot, booted=booted)
+    _answer(booted, args)
 
     log("restored %r (%d sessions)" % (wsname, len(snap["sessions"])))
     print("\nDone. The restored sessions are live again, so agterm-backup covers them "
@@ -395,6 +415,58 @@ def cmd_restore(args):
         os.remove(path)
         print("Archive consumed (%s). Use --keep to restore without removing it." % path)
     return 0
+
+
+# --------------------------------------------------------- the resume prompt
+
+RESUME_PROMPT = "Resume full session as-is"
+
+
+def _pane_text(target, pane):
+    try:
+        out = subprocess.run(["agtermctl", "session", "text", "--target", target,
+                              "--pane", pane], capture_output=True, text=True, timeout=15)
+    except Exception:
+        return ""
+    return out.stdout if out.returncode == 0 else ""
+
+
+def answer_resume_prompts(targets, timeout=180, choice="2", quiet=False):
+    """A resumed claude asks whether to replay the full session or a summary, and sits
+    there until answered. Boot can take a minute, so poll rather than sleep-and-hope.
+
+    `targets` is a list of (session_id, pane). Returns how many were answered."""
+    pending = list(targets)
+    answered = 0
+    deadline = time.time() + timeout
+    while pending and time.time() < deadline:
+        time.sleep(3)
+        for item in list(pending):
+            sid, pane = item
+            text = _pane_text(sid, pane)
+            if not text:
+                continue
+            if RESUME_PROMPT in text and "Enter to confirm" in text:
+                agtermctl("session", "type", "--target", sid, "--pane", pane,
+                          choice + "\n", check=False)
+                pending.remove(item)
+                answered += 1
+                if not quiet:
+                    print("      answered the resume prompt in %s/%s" % (sid[:8], pane))
+            elif "esc to interrupt" in text or "\u276f " in text:
+                pending.remove(item)      # booted past the prompt, nothing to answer
+    return answered
+
+
+def _answer(booted, args):
+    """A resumed claude asks full-session-vs-summary and waits; answer it for them."""
+    if not booted or getattr(args, "no_answer", False):
+        return
+    print("\nwatching for the resume prompt (up to %ds)..." % args.answer_timeout)
+    n = answer_resume_prompts(booted, timeout=args.answer_timeout,
+                              choice=args.answer_choice)
+    print("answered %d resume prompt(s) with %r." % (n, args.answer_choice))
+    log("answered %d resume prompt(s)" % n)
 
 
 def notify(text):
@@ -443,6 +515,7 @@ def cmd_pick_restore(args):
     # the picker shows "kind: label"; restore wants the label
     picked = picked.split(": ", 1)[1] if ": " in picked else picked
     args.name, args.no_boot, args.keep, args.force = picked, False, False, False
+    args.no_answer, args.answer_choice, args.answer_timeout = False, "2", 240
     rc = cmd_restore(args)
     notify("restored %s" % picked)
     return rc
@@ -548,6 +621,11 @@ def main():
     r.add_argument("--no-boot", action="store_true", help="recreate shells, skip claude")
     r.add_argument("--keep", action="store_true", help="keep the archive file after restoring")
     r.add_argument("--force", action="store_true", help="restore even if the workspace is open")
+    r.add_argument("--no-answer", action="store_true",
+                   help="leave claude's resume prompt for you to answer")
+    r.add_argument("--answer-choice", default="2",
+                   help="2 = resume full session as-is (default), 1 = from summary")
+    r.add_argument("--answer-timeout", type=int, default=240)
     r.set_defaults(fn=cmd_restore)
 
     pr = sub.add_parser("pick-restore", help="pick an archive in agterm's picker, restore it")

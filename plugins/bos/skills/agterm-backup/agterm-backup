@@ -142,6 +142,18 @@ def norm_flags(flags, agent="claude"):
             if a in ("--continue", "-c", "--fork-session"):
                 continue
         out.append(a)
+    return _dedupe(out)
+
+
+def _dedupe(flags):
+    """A pane can carry the same flag twice (a hand-typed resume on top of the original
+    launch); do not pass that on."""
+    seen, out = set(), []
+    for f in flags:
+        if f.startswith("-") and f in seen:
+            continue
+        seen.add(f)
+        out.append(f)
     return out
 
 
@@ -332,6 +344,47 @@ def _install_codex_hooks(py):
     print("%s codex capture hook in %s" % (what, CODEX_CONFIG))
     print("  NOTE: codex asks you to trust changed hooks on its next start — pick "
           "\"Trust all and continue\" once, or the hook never runs.")
+
+
+# --------------------------------------------------------- the resume prompt
+
+RESUME_PROMPT = "Resume full session as-is"
+
+
+def _pane_text(target, pane):
+    try:
+        out = subprocess.run(["agtermctl", "session", "text", "--target", target,
+                              "--pane", pane], capture_output=True, text=True, timeout=15)
+    except Exception:
+        return ""
+    return out.stdout if out.returncode == 0 else ""
+
+
+def answer_resume_prompts(targets, timeout=180, choice="2", quiet=False):
+    """A resumed claude asks whether to replay the full session or a summary, and sits
+    there until answered. Boot can take a minute, so poll rather than sleep-and-hope.
+
+    `targets` is a list of (session_id, pane). Returns how many were answered."""
+    pending = list(targets)
+    answered = 0
+    deadline = time.time() + timeout
+    while pending and time.time() < deadline:
+        time.sleep(3)
+        for item in list(pending):
+            sid, pane = item
+            text = _pane_text(sid, pane)
+            if not text:
+                continue
+            if RESUME_PROMPT in text and "Enter to confirm" in text:
+                agtermctl("session", "type", "--target", sid, "--pane", pane,
+                          choice + "\n", check=False)
+                pending.remove(item)
+                answered += 1
+                if not quiet:
+                    print("      answered the resume prompt in %s/%s" % (sid[:8], pane))
+            elif "esc to interrupt" in text or "\u276f " in text:
+                pending.remove(item)      # booted past the prompt, nothing to answer
+    return answered
 
 
 # --------------------------------------------------------------------------- status
@@ -613,6 +666,45 @@ def cmd_restore(args):
             print("  failed on %s: %s" % (label(r, meta), e))
     print("done: resumed %d%s." % (len(inject) - failed,
                                    (", %d failed" % failed) if failed else ""))
+
+    if not args.no_answer:
+        targets = [(r["pane_uuid"], "right" if r["pane_role"] == "right" else "left")
+                   for r, _m, _c in inject]
+        print("\nwatching for the resume prompt (up to %ds; claude can take a minute "
+              "to boot)..." % args.answer_timeout)
+        n = answer_resume_prompts(targets, timeout=args.answer_timeout,
+                                  choice=args.answer_choice)
+        print("answered %d resume prompt(s) with %r." % (n, args.answer_choice))
+    return 0
+
+
+def cmd_answer(args):
+    """Answer the resume prompt anywhere it is waiting — after a restore that ran
+    without --no-answer this is a no-op, but a manual `claude --resume` leaves them too."""
+    tree = load_tree()
+    targets = []
+    for ws in tree.get("workspaces", []):
+        for s in ws.get("sessions", []):
+            pid = (s.get("id") or "").upper()
+            for role, fg in (("left", s.get("foreground") or []),
+                             ("right", s.get("splitForeground") or [])):
+                if fg and os.path.basename(fg[0]) == "claude":
+                    targets.append((pid, role))
+    if args.target:
+        want = args.target.upper()
+        targets = [t for t in targets if t[0].startswith(want)]
+    waiting = [(sid, pane) for sid, pane in targets
+               if RESUME_PROMPT in _pane_text(sid, pane)]
+    print("claude panes: %d, sitting on the resume prompt: %d" % (len(targets), len(waiting)))
+    if not waiting:
+        return 0
+    if args.dry_run:
+        for sid, pane in waiting:
+            print("  would answer %r in %s/%s" % (args.answer_choice, sid[:8], pane))
+        return 0
+    n = answer_resume_prompts(waiting, timeout=args.answer_timeout,
+                              choice=args.answer_choice)
+    print("answered %d." % n)
     return 0
 
 
@@ -638,7 +730,21 @@ def main():
     pr.add_argument("--dry-run", action="store_true")
     pr.add_argument("--yes", action="store_true")
     pr.add_argument("--from-live", action="store_true", help=argparse.SUPPRESS)
+    pr.add_argument("--no-answer", action="store_true",
+                    help="do not answer claude's resume prompt afterwards")
+    pr.add_argument("--answer-choice", default="2",
+                    help="2 = resume full session as-is (default), 1 = from summary")
+    pr.add_argument("--answer-timeout", type=int, default=240,
+                    help="how long to keep watching for the prompt (default 240s)")
     pr.set_defaults(func=cmd_restore)
+
+    pa = sub.add_parser("answer", help="answer the resume prompt wherever it is waiting")
+    pa.add_argument("--target", help="only this session id/prefix")
+    pa.add_argument("--answer-choice", default="2",
+                    help="2 = resume full session as-is (default), 1 = from summary")
+    pa.add_argument("--answer-timeout", type=int, default=60)
+    pa.add_argument("--dry-run", action="store_true")
+    pa.set_defaults(func=cmd_answer)
 
     args = ap.parse_args()
     sys.exit(args.func(args))
