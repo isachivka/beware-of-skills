@@ -86,8 +86,26 @@ git commit -am 'chore(xray): switch tunnel egress to NewLink' && git push
 
 ### 4. Deploy
 
-**Confirm with the user before running this** — `run.sh` calls `xkeen -restart`, and every
-connection in the house drops for a few seconds.
+**Check the clone is clean before deploying.** `run.sh` copies the clone's working tree, not
+the commit, so a hand-edit left in `/opt/root/router` is what actually reaches xray:
+
+```bash
+ssh -i ~/.ssh/sshs root@192.168.1.1 -p 2022 'cd /opt/root/router && git status --short'
+```
+
+Any output means someone edited the router directly. `git pull` does **not** reliably clear
+it: git skips a file whose content is identical at the old and new commit, so a dirty file
+survives the pull untouched whenever the net diff across the pulled range is zero for it —
+which is exactly what happens when the mark is flipped and flipped back. Discard the edit
+before deploying, and tell the user what it was:
+
+```bash
+ssh -i ~/.ssh/sshs root@192.168.1.1 -p 2022 'cd /opt/root/router && git --no-pager diff'
+ssh -i ~/.ssh/sshs root@192.168.1.1 -p 2022 'cd /opt/root/router && git checkout -- configs/04_outbounds.json'
+```
+
+Then, **confirming with the user first** — `run.sh` calls `xkeen -restart`, and every
+connection in the house drops for a few seconds:
 
 ```bash
 ssh -i ~/.ssh/sshs root@192.168.1.1 -p 2022 'cd /opt/root/router && git pull && ./run.sh'
@@ -95,8 +113,20 @@ ssh -i ~/.ssh/sshs root@192.168.1.1 -p 2022 'cd /opt/root/router && git pull && 
 
 ### 5. Verify
 
-Re-run the `netstat` check from step 1. It must show the new source IP. Existing sockets die
-with the restart, so a stale IP means the deploy did not take, not lag.
+Read the mark back off the live config — this is the authoritative check, and it catches a
+deploy that copied something other than what was committed:
+
+```bash
+ssh -i ~/.ssh/sshs root@192.168.1.1 -p 2022 'grep -n "^ *\"mark\"" /opt/etc/xray/configs/04_outbounds.json'
+```
+
+Then re-run the `netstat` check from step 1. Sockets on the old uplink linger in `LAST_ACK` /
+`FIN_WAIT` for a minute after the restart, so count **ESTABLISHED only** — a mix is normal
+right after a deploy, a stale ESTABLISHED majority is not:
+
+```bash
+ssh -i ~/.ssh/sshs root@192.168.1.1 -p 2022 'netstat -tn | grep 194.59.204.177 | awk "{print \$4, \$NF}" | sed "s/:[0-9]*//" | sort | uniq -c'
+```
 
 Confirm the tunnel actually carries traffic — a mark pointing at a dead table blackholes
 silently:
@@ -119,6 +149,9 @@ curl -so /dev/null -w 'dl=%{speed_download} B/s\n' --max-time 30 \
 
 - About to `ssh` and edit a file under `/opt/` → wrong direction, go back to `~/pets/router`
 - About to run `./run.sh` without having pushed → the router will pull an older commit
+- About to run `./run.sh` without checking `git status` in the clone → a hand-edit on the
+  router silently wins over the commit, and `git pull` will not always clear it
+- Verified the switch by source IP alone → count ESTABLISHED, and read the live config back
 - About to hardcode the NewLink mark without reading it off the router → resolve it
 - About to restart xkeen when the mark is already correct → nothing to deploy
 
