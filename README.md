@@ -30,27 +30,6 @@ clone, re-run `codex plugin add bos@beware-of-skills` and start a new thread to 
 
 ## Skills — `bos`
 
-### flow-recorder
-
-A meta-skill that creates other skills by recording browser workflows. You walk through a routine web process once — clicking buttons, filling forms — and it generates a standalone skill that can replay the process autonomously.
-
-**Features:**
-- Three auth modes: **manual** (you log in yourself), **credentials** (hardcoded for convenience), **none**
-- Stable element identification — relies on visible text, `data-testid`, and HTML ids instead of fragile CSS classes
-- **Update mode** — walk through an existing flow to patch steps when the site UI changes
-- Automatically asks whether field values should be hardcoded or prompted at runtime
-
-**Triggers:** `record flow`, `automate website`, `create browser skill`
-
-**Example:**
-
-> *You:* record flow
-> *Claude:* What's the flow name, URL, auth type, and a short description?
-> *You:* `submit-meters`, `https://utility.example.com`, credentials, submit monthly meter readings
-> *Claude:* *(opens browser, logs in, then follows your instructions step by step, recording everything)*
-> *You:* done
-> *Claude:* *(generates `~/.claude/skills/submit-meters/SKILL.md`)*
-
 ### agent-pm
 
 Turns Claude into a **manager that does nothing itself** — it orchestrates a fleet of full Claude Code instances running in [agterm](https://github.com/umputun/agterm) sessions: one worker per repo/role, delegation with briefs, a 5-minute check loop, PM-held gates (plan/PR review, prod actions), and battle-tested recovery playbooks for degraded workers.
@@ -208,22 +187,7 @@ back as shells in the right directory — a snapshot is not a checkpoint.
 
 ## Skills — `bosp` (personal)
 
-Wired to my home router and my Ozon account. Install with `/plugin install bosp@beware-of-skills` if you really want them.
-
-### ozon-orders
-
-Gives Claude read access to a self-hosted **Ozon Orders History** service — a personal API over one's [Ozon](https://ozon.ru) purchase history. Ask about past orders, search items by title, check order status (delivered / in progress / cancelled), find returned items, or get spending statistics — and Claude queries the API and answers.
-
-**Setup:** the service must be reachable on your network. Default base URL is `http://192.168.1.10:3027`; override with the `OZON_HISTORY_BASE` env var.
-
-**What it exposes** (the whole API): `GET /api/items` (cursor-paginated orders, `q` search, max 200/page), `GET /api/stats` (spending buckets by `year`/`month`/`week` + range totals and returned amount), `GET /api/images/<file>`, `GET /api/health`. A bundled `ozon.py` helper handles pagination and client-side filtering.
-
-```bash
-python3 ~/.claude/skills/ozon-orders/ozon.py stats --granularity year
-python3 ~/.claude/skills/ozon-orders/ozon.py items --q "нори" --all --count
-```
-
-**Triggers:** "ozon orders", "ozon history", "сколько я потратил на озоне", "что заказывали на Озоне", "возвраты", or any question about this person's Ozon purchases.
+Wired to my home router. Install with `/plugin install bosp@beware-of-skills` if you really want it.
 
 ### vpn-to
 
