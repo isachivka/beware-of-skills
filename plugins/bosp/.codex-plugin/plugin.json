@@ -1,0 +1,26 @@
+{
+  "name": "bosp",
+  "version": "1.0.0",
+  "description": "Skills wired to Igor's own hardware and accounts — useful to exactly one person.",
+  "author": {
+    "name": "Igor Sachivka",
+    "url": "https://github.com/isachivka"
+  },
+  "homepage": "https://github.com/isachivka/beware-of-skills",
+  "repository": "https://github.com/isachivka/beware-of-skills",
+  "license": "MIT",
+  "keywords": ["skills", "homelab", "personal"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "beware-of-skills: personal",
+    "shortDescription": "Home-router VPN uplink switching and Ozon order history.",
+    "longDescription": "Personal skills bound to one household: switching the home router's xkeen tunnel between uplinks, and querying a private read-only API over Ozon purchase history.",
+    "developerName": "Igor Sachivka",
+    "category": "Productivity",
+    "capabilities": ["Interactive"],
+    "defaultPrompt": [
+      "Which uplink is the VPN on right now?",
+      "How much did I spend on Ozon last year?"
+    ]
+  }
+}

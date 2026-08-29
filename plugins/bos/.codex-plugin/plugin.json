@@ -1,0 +1,27 @@
+{
+  "name": "bos",
+  "version": "1.0.0",
+  "description": "A collection of agent skills that nobody asked for, but everyone deserves.",
+  "author": {
+    "name": "Igor Sachivka",
+    "url": "https://github.com/isachivka"
+  },
+  "homepage": "https://github.com/isachivka/beware-of-skills",
+  "repository": "https://github.com/isachivka/beware-of-skills",
+  "license": "MIT",
+  "keywords": ["skills", "agterm", "revdiff", "automation"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "beware-of-skills",
+    "shortDescription": "agterm session management, browser-flow recording, an agent PM, memory review, Russian diff review.",
+    "longDescription": "Skills for driving the agterm terminal (archive, back up and fork sessions), delegating work to a fleet of agents, recording browser workflows into new skills, auditing an agent memory directory, and reviewing a diff in revdiff with the prose translated into Russian.",
+    "developerName": "Igor Sachivka",
+    "category": "Productivity",
+    "capabilities": ["Interactive", "Write"],
+    "defaultPrompt": [
+      "Review this diff in Russian with revdiff.",
+      "Back up my agterm sessions before I reboot.",
+      "Audit my agent memory for stale entries."
+    ]
+  }
+}
