@@ -13,8 +13,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "beware-of-skills",
-    "shortDescription": "agterm session management, an agent PM, memory review, and Russian diff review.",
-    "longDescription": "Skills for driving the agterm terminal (archive, back up and fork sessions), delegating work to a fleet of agents, auditing an agent memory directory, and reviewing a diff in revdiff with the prose translated into Russian.",
+    "shortDescription": "agterm session management, peer-agent chat, an agent PM, memory review, and Russian diff review.",
+    "longDescription": "Skills for driving the agterm terminal (archive, back up and fork sessions), letting Claude and Codex talk across a split pane, delegating work to a fleet of agents, auditing an agent memory directory, and reviewing a diff in revdiff with the prose translated into Russian.",
     "developerName": "Igor Sachivka",
     "category": "Productivity",
     "capabilities": ["Interactive", "Write"],

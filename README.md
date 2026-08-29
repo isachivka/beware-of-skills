@@ -45,6 +45,19 @@ Born from a real production day: a frontend redesign shipped through 3 feedback 
 > *You:* Ты менеджер по делам document-restoration. Ты ничего не делаешь руками — только даёшь инструкции агентам через agterm и проверяешь их работу.
 > *Claude:* *(maps the sessions, asks who is who, and starts running the show)*
 
+### peer-chat
+
+Lets Claude Code and Codex talk directly across the two panes of one agterm split. A guarded helper
+checks that the target pane is running the expected agent and that its composer is empty before it
+types or submits anything. The skill never starts agents or answers permission and trust prompts.
+
+Stolen—with attribution—from
+[umputun/agterm's `two-agent-chat` recipe](https://github.com/umputun/agterm/tree/master/cookbook/two-agent-chat)
+under the MIT license. The published source is in `umputun/agterm`, not `umputun/cc-thingz`.
+
+**Triggers:** "chat with codex", "work with codex", "discuss this with codex", or an incoming
+`Chat from Codex:` prompt.
+
 ### agterm-backup
 
 Reboot your Mac (for a macOS or [agterm](https://github.com/umputun/agterm) update) **without losing your running Claude Code sessions** — every one comes back **resumed** (`claude --resume <id>`) in its original pane.

@@ -9,7 +9,7 @@
     {
       "name": "bos",
       "source": "./plugins/bos",
-      "description": "agterm session management, an agent PM, memory review, and Russian diff review."
+      "description": "agterm session management, peer-agent chat, an agent PM, memory review, and Russian diff review."
     },
     {
       "name": "bosp",
