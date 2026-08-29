@@ -5,7 +5,7 @@ A collection of Claude Code skills that nobody asked for, but everyone deserves.
 ## Installation
 
 This repo is a Claude Code plugin marketplace with two plugins: **bos** (the general set) and
-**bosp** (skills wired to my own hardware and accounts — you almost certainly want to skip it).
+**bosp** (a currently empty bundle reserved for personal integrations).
 
 ```
 /plugin marketplace add isachivka/beware-of-skills
@@ -187,28 +187,7 @@ back as shells in the right directory — a snapshot is not a checkpoint.
 
 ## Skills — `bosp` (personal)
 
-Wired to my home router. Install with `/plugin install bosp@beware-of-skills` if you really want it.
-
-### vpn-to
-
-Switches which uplink the home router's xkeen/xray tunnel dials the VPS over, and reports
-which one it is on now. `/vpn-to nw`, `/vpn-to rt`, or no argument for status.
-
-Very specific to one Keenetic router with two ISPs, but the mechanism generalises: on
-KeeneticOS the provider checkboxes in a connection policy decide which *clients* get
-redirected into xkeen — they do nothing for xray's own outbound socket. xkeen deliberately
-excludes xray from its OUTPUT chain by gid, so without a mark the tunnel leaves over the
-default route no matter what the web interface says. The uplink is chosen by
-`streamSettings.sockopt.mark`, which lands in an `ip rule` and picks the policy's routing
-table.
-
-Reads the policy codes off the router instead of hardcoding them, keeps the edit strictly
-one-directional (local repo → commit → push → pull → `run.sh`, never an edit on the router,
-which the deploy script would clobber anyway), validates the JSON survives xray's comment
-stripping before writing, and refuses to restart the tunnel when nothing changed.
-
-**Triggers:** `/vpn-to rt`, `/vpn-to nw`, "переключи впн на ростелеком", "через какой
-провайдер сейчас впн", VPN slow because one provider's route degraded.
+No skills are currently published in this bundle.
 
 ## Contributing
 

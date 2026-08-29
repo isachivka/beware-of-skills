@@ -14,7 +14,7 @@
     {
       "name": "bosp",
       "source": "./plugins/bosp",
-      "description": "Personal: home-router VPN uplink switching."
+      "description": "Personal plugin bundle (currently empty)."
     }
   ]
 }
