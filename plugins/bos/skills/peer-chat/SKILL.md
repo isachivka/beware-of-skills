@@ -8,7 +8,11 @@ allowed-tools: Bash, Read, Grep, Glob
 
 > Stolen, with attribution, from
 > [umputun/agterm's two-agent-chat recipe](https://github.com/umputun/agterm/tree/master/cookbook/two-agent-chat)
-> (MIT). Vendored from upstream commit `7f289aa`.
+> (MIT). Vendored from upstream commit `7f289aa`, plus local patches marked `LOCAL PATCH`
+> in `peer-chat.py`: typing is chunked (one big `session type` overruns a busy TUI's tty
+> buffer and loses a chunk out of the middle), the composer check accepts a wrapped or
+> scrolled view instead of demanding the start of the message, and a hidden split is shown
+> for the duration of a send because `surface cursor` cannot read a hidden surface.
 
 Talk with Codex in the split pane. The user reads both panes, so the conversation itself is the
 result even when code comes out of it.

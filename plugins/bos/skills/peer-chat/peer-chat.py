@@ -13,6 +13,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,9 @@ RETRY_ATTEMPTS = 5
 RETRY_DELAY = 10.0
 BOX_LINES = 40
 EMPTY_CURSOR_COLUMN = 2
+# A busy TUI does not drain its pty fast enough for one big write; see type_text.
+TYPE_CHUNK = 400
+TYPE_CHUNK_DELAY = 0.08
 MIN_WRAPPED_PROBE = 40
 MAX_MESSAGE_BYTES = 64 * 1024
 # Claude can put a short context label inside the top composer rule, for example `e2e`.
@@ -171,6 +175,32 @@ def require_target(sid: str, profile: Profile) -> str:
     return str(info["id"])
 
 
+@contextmanager
+def pane_reachable(sid: str, profile: Profile) -> Iterator[bool]:
+    """Show a hidden split for the duration of a send, then hide it again.
+
+    LOCAL PATCH (not upstream): agterm reads and types into a hidden split happily, but
+    `surface cursor` on one fails with "failed to read cursor position", and that is the
+    check proving the composer is empty. A codex pane the user has collapsed is therefore
+    unreachable even though it is alive and listening. Showing it around the send is the
+    smallest fix that keeps the emptiness check honest; the pane goes back to hidden
+    afterwards, so the user's layout survives.
+    """
+    info = find_node(sid)
+    hidden = bool(info.get("hasSplit")) and not info.get("split")
+    if not (hidden and profile.pane == "right"):
+        yield False
+        return
+    ctl("session", "split", "visibility", "on", "--target", sid)
+    try:
+        yield True
+    finally:
+        try:
+            ctl("session", "split", "visibility", "off", "--target", sid)
+        except RuntimeError:
+            pass          # leaving it visible is a cosmetic failure, never a send failure
+
+
 def resolve_session(explicit: str | None, profile: Profile) -> str:
     sid = explicit or os.environ.get("AGTERM_SESSION_ID")
     if sid:
@@ -226,16 +256,30 @@ def cursor_column(sid: str, profile: Profile) -> int:
 
 
 def type_text(sid: str, profile: Profile, text: str) -> None:
+    """Type into the target pane in small pieces.
+
+    LOCAL PATCH (not upstream): one `session type` call with the whole body overruns the
+    tty input buffer of a TUI that is mid-turn and does not drain it fast enough — the
+    receiving composer then holds the message with a chunk missing from the middle.
+    Measured: 2.4 KB in one call lost 172 of 400 marker tokens; the same text in 400-byte
+    pieces 80 ms apart arrived complete. The verification that follows catches the loss
+    and withholds the submit, which is how a peer-chat message ends up sitting unsent in
+    the other agent's composer.
+    """
     require_target(sid, profile)
-    ctl(
-        "session",
-        "type",
-        text,
-        "--pane",
-        profile.pane,
-        "--target",
-        sid,
-    )
+    for start in range(0, len(text), TYPE_CHUNK):
+        piece = text[start : start + TYPE_CHUNK]
+        ctl(
+            "session",
+            "type",
+            piece,
+            "--pane",
+            profile.pane,
+            "--target",
+            sid,
+        )
+        if start + TYPE_CHUNK < len(text):
+            time.sleep(TYPE_CHUNK_DELAY)
 
 
 def trailing_input_block(text: str) -> list[str]:
@@ -253,12 +297,23 @@ def trailing_input_block(text: str) -> list[str]:
 
 
 def codex_prompt_text(text: str) -> str | None:
+    """The composer's content, wrapped rows included.
+
+    LOCAL PATCH (not upstream): a long line wraps onto the rows below the `›` row, and
+    reading only the prompt row made the verification probe see just the first visual
+    row. In a narrow pane that row holds fewer than MIN_WRAPPED_PROBE characters, so a
+    correctly typed message failed to verify and the submit was withheld — the message
+    then sat in Codex's composer unsent.
+    """
+    block = trailing_input_block(text)
     content = None
-    for line in trailing_input_block(text):
+    for index, line in enumerate(block):
         if CODEX_SHELL_PROMPT_RE.match(line):
             content = None
         if match := CODEX_PROMPT_RE.match(line):
-            content = match.group(1)
+            parts = [match.group(1)]
+            parts += [row.strip() for row in block[index + 1 :]]
+            content = " ".join(part for part in parts if part)
     return content
 
 
@@ -325,30 +380,37 @@ def normalize(profile: Profile, message: str) -> str:
 
 
 def composer_has_message(profile: Profile, content: str, typed: str) -> bool:
+    """Is what the composer shows part of what we typed?
+
+    LOCAL PATCH (not upstream): the old test demanded that the visible content START the
+    typed message (claude: the routing label; codex: a prefix of at least
+    MIN_WRAPPED_PROBE characters). A composer that wraps in a narrow pane, or scrolls
+    because the message is long, shows the MIDDLE or the TAIL instead — the message had
+    landed perfectly and the submit was withheld anyway, leaving it unsent in the other
+    agent's box. Both real peer-chat stalls looked like that.
+
+    So: the shown text must be a contiguous slice of the typed text, whitespace removed
+    (a wrap can break mid-word, so rows rejoin with or without a space the original never
+    had). That still rejects the failure this check exists for — a composer holding a
+    spliced message with a chunk dropped out of the middle is not a slice of anything.
+    """
     pasted = bool(PASTED_RE.fullmatch(content))
+    shown_raw = " ".join(content.split())
+    shown = "".join(content.split())
+    sent = "".join(typed.split())
+
     if profile.agent == "claude":
-        shown = " ".join(content.split())
-        sent = " ".join(typed.split())
-        label = profile.label.strip()
+        label = "".join(profile.label.split())
         if not sent.startswith(label):
             return False
-        if not (shown.startswith(label) or PASTED_TEXT_RE.match(shown)):
-            return False
+        if PASTED_TEXT_RE.match(shown_raw):
+            # Claude collapses a long paste to "[Pasted text #N]" — nothing to compare.
+            return True
+    elif pasted:
+        return True
 
-        body = sent[len(label) :].lstrip()
-        if not body:
-            return False
-        if shown.startswith(label):
-            return body[:MESSAGE_FRAGMENT] in shown
-
-        fragment_len = min(MESSAGE_FRAGMENT, len(body))
-        return any(
-            body[start : start + fragment_len] in shown
-            for start in range(len(body) - fragment_len + 1)
-        )
-    required = min(len(typed), MIN_WRAPPED_PROBE)
-    literal = typed.startswith(content) and len(content) >= required
-    return literal or pasted
+    required = min(len(sent), MIN_WRAPPED_PROBE)
+    return len(shown) >= required and shown in sent
 
 
 def wait_for_composed(sid: str, profile: Profile, typed: str) -> str | None:
@@ -374,6 +436,13 @@ def wait_for_accepted(sid: str, profile: Profile, held: str) -> bool:
 
 
 def send(sid: str, profile: Profile, message: str) -> int:
+    with pane_reachable(sid, profile) as unhidden:
+        if unhidden:
+            time.sleep(SUBMIT_DELAY)      # let the surface exist before it is measured
+        return _send(sid, profile, message)
+
+
+def _send(sid: str, profile: Profile, message: str) -> int:
     typed = normalize(profile, message)
     pane = pane_text(sid, profile)
     if live_prompt_text(profile, pane) is None:
