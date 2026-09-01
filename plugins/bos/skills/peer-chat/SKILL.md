@@ -8,7 +8,7 @@ allowed-tools: Bash, Read, Grep, Glob
 
 > Stolen, with attribution, from
 > [umputun/agterm's two-agent-chat recipe](https://github.com/umputun/agterm/tree/master/cookbook/two-agent-chat)
-> (MIT). Vendored from upstream commit `8acd976`.
+> (MIT). Vendored from upstream commit `7f289aa`.
 
 Talk with Codex in the split pane. The user reads both panes, so the conversation itself is the
 result even when code comes out of it.
