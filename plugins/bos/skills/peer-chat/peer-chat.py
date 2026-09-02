@@ -28,6 +28,8 @@ EMPTY_CURSOR_COLUMN = 2
 # A busy TUI does not drain its pty fast enough for one big write; see type_text.
 TYPE_CHUNK = 400
 TYPE_CHUNK_DELAY = 0.08
+# A composer may count its own trailing newline, or not; nothing else should differ.
+PASTE_COUNT_SLACK = 2
 MIN_WRAPPED_PROBE = 40
 MAX_MESSAGE_BYTES = 64 * 1024
 # Claude can put a short context label inside the top composer rule, for example `e2e`.
@@ -44,6 +46,9 @@ CODEX_SHELL_PROMPT_RE = re.compile(r"^![\s ]*(.*?)\s*$")
 CODEX_FOOTER_RE = re.compile(r"^ {2}\S.*$")
 CLAUDE_PROMPT_RE = re.compile(r"^\s*❯[\s ]*(.*?)\s*$")
 PASTED_RE = re.compile(r"\[Pasted Content \d+ chars?\]")
+# The same marker, with the count captured: when the composer tells us how many characters
+# it holds, that number is the only thing that can prove a collapsed paste is whole.
+PASTED_COUNT_RE = re.compile(r"\[Pasted Content (\d+) chars?\]")
 # loose on purpose: Claude draws "[Pasted text #16]" and "[Pasted text #1 +12 lines]", and a
 # precise pattern would refuse an unseen variant. The body fragment below is what proves
 # whose content the box holds.
@@ -396,6 +401,11 @@ def composer_has_message(profile: Profile, content: str, typed: str) -> bool:
     """
     pasted = bool(PASTED_RE.fullmatch(content))
     shown_raw = " ".join(content.split())
+    # A collapsed paste hides its content, so a message that arrived with a chunk missing
+    # verifies as fine and is submitted damaged — that is how a Codex reply reached Claude
+    # with holes in it. When the marker carries a character count, hold it to that count.
+    if count := PASTED_COUNT_RE.search(shown_raw):
+        return abs(int(count.group(1)) - len(typed)) <= PASTE_COUNT_SLACK
     shown = "".join(content.split())
     sent = "".join(typed.split())
 
@@ -435,6 +445,15 @@ def wait_for_accepted(sid: str, profile: Profile, held: str) -> bool:
         time.sleep(0.1)
 
 
+def describe_tail(pane: str, rows: int = 4, width: int = 90) -> str:
+    """The last few non-blank rows of the pane, for a refusal message to carry."""
+    lines = [line.rstrip() for line in pane.splitlines() if line.strip()][-rows:]
+    if not lines:
+        return "; the pane read back empty"
+    shown = " | ".join(line[:width] for line in lines)
+    return "; pane tail: " + shown
+
+
 def send(sid: str, profile: Profile, message: str) -> int:
     with pane_reachable(sid, profile) as unhidden:
         if unhidden:
@@ -446,9 +465,13 @@ def _send(sid: str, profile: Profile, message: str) -> int:
     typed = normalize(profile, message)
     pane = pane_text(sid, profile)
     if live_prompt_text(profile, pane) is None:
+        # LOCAL PATCH (not upstream): quote what the parser actually saw. The bare reason
+        # lists four possible causes and names none, so a refusal could not be acted on
+        # without going to the pane by hand — and by then the screen has moved on.
         raise PromptBlocked(
             "target composer prompt is not recognisable (shell mode, disabled input, a "
             "trailing modal or status row, or an unknown prompt glyph); nothing was typed"
+            + describe_tail(pane)
         )
     if cursor_column(sid, profile) != EMPTY_CURSOR_COLUMN:
         raise PromptBlocked("target composer is not confirmably empty; nothing was typed")

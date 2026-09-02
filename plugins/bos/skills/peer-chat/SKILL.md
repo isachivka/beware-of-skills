@@ -17,6 +17,11 @@ allowed-tools: Bash, Read, Grep, Glob
 Talk with Codex in the split pane. The user reads both panes, so the conversation itself is the
 result even when code comes out of it.
 
+The Codex side reaches the script through `PATH` (`peer-chat.py`), this side by absolute
+path. Keep `~/.local/bin/peer-chat.py` a wrapper that execs the copy in the newest installed
+plugin, never a second frozen copy: when the two diverged, Claude ran the patched script and
+Codex kept typing whole messages in one write, losing chunks of every long reply.
+
 Everything that touches the pane goes through the bundled `peer-chat.py` next to this `SKILL.md`.
 Resolve and invoke it by its absolute path; do not depend on a separate user-level installation.
 The short name in examples below means that resolved path. Do not drive `agtermctl` directly: the
@@ -75,6 +80,10 @@ The only thing you may put into that pane is text in a prompt the script has con
 Never answer anything on the user's behalf: not a chooser entry, not a trust prompt, not a
 permission or approval request, not a warning. Those answers carry the user's authority and are his
 to give.
+
+A refusal now quotes the last rows of the target pane, so read those before doing anything
+else: a spinner row, a modal, a shell prompt and a composer still holding unsent text each
+call for a different response, and only the last one is yours to leave alone.
 
 If the script refuses, read which check failed and stop. A refusal before typing means nothing was
 written. A refusal after typing means the text may still be sitting in the composer, so say so and
