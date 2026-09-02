@@ -198,6 +198,26 @@ back as shells in the right directory — a snapshot is not a checkpoint.
 
 **Triggers:** `/bos:agterm-archive`, "заархивируй воркспейс", "верни воркспейс из архива".
 
+### decomment
+
+Strips the noise comments an AI agent left on a branch: the ones that restate the line below
+them, and the ones that narrate the change as a story — "previously this used X", "added
+after the incident". Git already holds the history and the code already holds the present.
+
+```bash
+/bos:decomment            # everything this branch added
+/bos:decomment src/api    # or a narrower scope
+```
+
+Scoped to comments the branch itself added, so nobody's older notes get swept up. Comments
+the toolchain reads (`eslint-disable`, `@ts-expect-error`, `# noqa`, pragmas) are code in
+disguise and stay; so do traps, invariants, and any number someone actually measured. It
+proposes the cut list first, and shows what it nearly cut and kept — that second list is
+where you correct its taste.
+
+**Triggers:** `/bos:decomment`, "убери бессмысленные комменты", "the agent commented every
+line".
+
 ## Skills — `bosp` (personal)
 
 No skills are currently published in this bundle.
