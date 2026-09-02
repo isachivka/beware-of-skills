@@ -211,9 +211,10 @@ after the incident". Git already holds the history and the code already holds th
 
 Scoped to comments the branch itself added, so nobody's older notes get swept up. Comments
 the toolchain reads (`eslint-disable`, `@ts-expect-error`, `# noqa`, pragmas) are code in
-disguise and stay; so do traps, invariants, and any number someone actually measured. It
-proposes the cut list first, and shows what it nearly cut and kept — that second list is
-where you correct its taste.
+disguise and stay; so do traps, invariants, and any number someone actually measured. A comment is not atomic either: where an
+agent welded one useful sentence to one worthless one, it trims to the survivor instead of
+keeping the pair. It proposes the list first — cut, trim, keep, plus what it nearly cut and
+kept, which is where you correct its taste.
 
 **Triggers:** `/bos:decomment`, "убери бессмысленные комменты", "the agent commented every
 line".

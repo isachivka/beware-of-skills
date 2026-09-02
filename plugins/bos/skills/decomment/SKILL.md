@@ -42,6 +42,30 @@ An argument narrows or moves the scope (a ref, a path); honour it and say what y
 - **Explains the language.** What `??`, `useMemo`, a context manager or a try/finally does.
 - **Reassures.** "this is safe because we checked above" three lines under the check.
 
+## Trim
+
+A comment is not atomic. The common shape after an agent writes it is one useful sentence
+welded to one worthless one:
+
+```
+/**
+ * A session `uid` is `userId_projectId_sessionHash`.   <- the domain format, unguessable: keep
+ * Returns the project id, or `undefined` when the uid  <- the six lines below say this: cut
+ * does not have that shape.
+ */
+```
+
+Cut the dead sentence, keep the live one, and **delete only** — never rewrite the words that
+stay, never merge two sentences into a better one. If what survives no longer reads as a
+sentence, keep the whole thing and say so in the report.
+
+Two recurring dead openers worth naming:
+
+- **The restated signature.** The first line of a doc block that says what the symbol's own
+  name says (`Temp session data is gone` over `classifyMissingSessionData`).
+- **Diff voice.** "say *why* here", "note that we now…", "this addresses the review comment".
+  A comment talks to whoever opens the file in a year, not to the reviewer of this PR.
+
 ## Keep
 
 - **Why, not what** — the reason a non-obvious choice was made, an invariant the types
@@ -52,7 +76,8 @@ An argument narrows or moves the scope (a ref, a path); honour it and say what y
   `# noqa`, `#pragma`, codegen markers, license headers. These are code wearing a comment's
   clothes — deleting one changes behaviour.
 - **Public API docs** in a codebase that documents its public surface, even when they read
-  as obvious. Follow the file's neighbours.
+  as obvious. Follow the file's neighbours — including their length: a one-line convention
+  makes a six-line block on the symbol next door the thing that looks wrong.
 - **A measured number.** "batching over 500 doubled p99" earns its line; "for performance"
   does not.
 - Anything you are unsure about. The user can always ask for a second, harsher pass.
@@ -61,12 +86,14 @@ An argument narrows or moves the scope (a ref, a path); honour it and say what y
 
 1. Read the diff, then read each candidate **in its file**, not in the hunk — a comment can
    read as redundant in a diff and carry the file's only warning in place.
-2. List what you propose to cut, grouped by file: the comment verbatim, one clause on why it
-   goes. Anything you nearly cut and kept goes in a short second list — that is where the
-   user corrects your taste.
-3. Apply after the user agrees, deleting whole comment lines and trailing comments. Never
-   reword a surviving comment, never touch code, never reflow untouched lines. Mind
-   comment-shaped text inside strings and regexes.
+2. List what you propose, grouped by file, each with the comment verbatim and one clause of
+   reasoning: **cut** whole, **trim** to the surviving sentences (quote what goes and what
+   stays), **keep**. Anything you nearly cut and kept goes in a short second list — that is
+   where the user corrects your taste.
+3. Apply after the user agrees: delete whole comment lines, trailing comments, and — for a
+   trim — the dead sentences inside a block. Deletion only: never reword what stays, never
+   touch code, never reflow a line you did not cut into. Mind comment-shaped text inside
+   strings and regexes.
 4. Verify: the repo's typecheck or lint on the touched files, then `git diff` — every hunk
    must be a deletion of comment lines and nothing else.
 5. Report the count per file and leave the commit to the user unless they asked otherwise.
