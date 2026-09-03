@@ -42,6 +42,21 @@ resumed with the wrong one.
   receives the exact `session_id` on stdin. Claude Code re-reads hooks per event, so
   a newly-installed hook captures **already-running** sessions on their next activity.
 
+## Snapshots are not automatic — the hook and the snapshot are different things
+
+The hook writes one live record per pane on every session event, so `pane -> session id`
+stays current on its own. `snapshot.json` is written only by `agterm-backup snap`, which
+nothing calls by itself; `restore --from-live` needs no snapshot at all, and agterm restores
+the tree itself, so most of what a snapshot holds is a second copy of what the terminal
+already knows. It earns its keep only when a live record is gone or was overwritten by
+another agent in the same pane.
+
+`agterm-backup timer install` puts `snap` on a launchd schedule (default every 900s,
+plus once at load); `timer status` / `timer uninstall` manage it. The job execs
+`~/.local/bin/agterm-backup` when that exists — often a symlink into a checkout — and
+generates a resolving wrapper only when nothing is there. Never write through that path
+blindly: writing a wrapper over the symlink overwrites the script it points at.
+
 ## The resume prompt
 
 A resumed claude does not go straight back to work: for an old or large session it asks
