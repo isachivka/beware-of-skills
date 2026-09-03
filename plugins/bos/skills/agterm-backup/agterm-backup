@@ -26,6 +26,7 @@ Commands:
 import sys
 import os
 import re
+import shlex
 import json
 import glob
 import time
@@ -149,7 +150,39 @@ def norm_flags(flags, agent="claude"):
             if a in ("--continue", "-c", "--fork-session"):
                 continue
         out.append(a)
-    return _dedupe(out)
+    return _dedupe(drop_positionals(out, agent))
+
+
+VALUE_FLAGS = {
+    "--model", "-m", "--effort", "--add-dir", "--append-system-prompt",
+    "--append-system-prompt-file", "--system-prompt", "--system-prompt-file",
+    "--mcp-config", "--settings", "--permission-mode", "--name", "-n", "--agents",
+    "--fallback-model", "--max-budget-usd", "--output-format", "--input-format",
+    "--allowedTools", "--allowed-tools", "--disallowedTools", "--disallowed-tools",
+    "--plugin-dir", "--session-id", "--config", "-c",
+}
+
+
+def drop_positionals(flags, agent="claude"):
+    """Keep flags (and the values that belong to them); drop bare positional words.
+
+    A pane launched as `claude --dangerously-skip-permissions "<a long prompt>"` carries
+    that whole prompt in its argv. Replaying it on resume re-injects the task as a fresh
+    message — and the words reach the shell unquoted, so an apostrophe in the prompt
+    wedges it at a `quote>` continuation and a backtick would run as a command.
+    """
+    out, expect_value = [], False
+    for token in flags:
+        if expect_value:
+            out.append(token)
+            expect_value = False
+            continue
+        if token.startswith("-"):
+            out.append(token)
+            expect_value = token in VALUE_FLAGS and "=" not in token
+            continue
+        # codex takes its prompt positionally too; neither agent needs it to resume
+    return out
 
 
 def _dedupe(flags):
@@ -179,10 +212,13 @@ def live_for(live, pid, role, agent):
 
 
 def resume_cmd(agent, sid, flags):
-    """The shell line that puts an agent back into session `sid`."""
-    if agent == "codex":
-        return " ".join(["codex", "resume", sid] + list(flags))
-    return " ".join(["claude", "--resume", sid] + list(flags))
+    """The shell line that puts an agent back into session `sid`.
+
+    Every token is shell-quoted: these come from a pane's argv, so one apostrophe types
+    a line the shell never finishes and a backtick would be command substitution."""
+    parts = (["codex", "resume", sid] if agent == "codex"
+             else ["claude", "--resume", sid]) + list(flags)
+    return " ".join(shlex.quote(t) for t in parts)
 
 
 def read_live():

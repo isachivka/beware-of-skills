@@ -57,6 +57,17 @@ plus once at load); `timer status` / `timer uninstall` manage it. The job execs
 generates a resolving wrapper only when nothing is there. Never write through that path
 blindly: writing a wrapper over the symlink overwrites the script it points at.
 
+## What goes into the resume line
+
+Only the flags. A pane launched as `claude --dangerously-skip-permissions "<a long
+prompt>"` keeps that prompt in its argv, and replaying it would re-inject the task as a
+fresh message on top of the resumed history. Positional words are dropped; a flag's own
+value is kept (`--model sonnet` survives as a pair).
+
+Every token is shell-quoted. The words come from a pane's argv, so an apostrophe — "the
+repo's tooling" — leaves the shell at a `quote>` continuation with nothing run, and a
+backtick would be command substitution rather than text. `test_resume_cmd.py` covers both.
+
 ## The resume prompt
 
 A resumed claude does not go straight back to work: for an old or large session it asks
