@@ -55,35 +55,97 @@ def norm_flags(argv, agent):
     return out
 
 
-def agent_argv(agent):
-    """The launch argv of the agent process this hook was spawned from. Walked up
-    the process tree: a hook may run under an intermediate shell. ps joins argv
-    with spaces, so an argument containing one is not recovered faithfully — flags
-    do not have any."""
+def agent_proc(agent):
+    """(pid, argv) of the agent process this hook was spawned from. Walked up the
+    process tree: a hook may run under an intermediate shell. ps joins argv with
+    spaces, so an argument containing one is not recovered faithfully — flags do not
+    have any."""
     pid = os.getppid()
     for _ in range(6):
         if pid <= 1:
-            return []
+            return None, []
         try:
             out = subprocess.run(["ps", "-o", "ppid=,args=", "-p", str(pid)],
                                  capture_output=True, text=True, timeout=5).stdout.strip()
         except Exception:
-            return []
+            return None, []
         if not out:
-            return []
+            return None, []
         head, _, rest = out.partition(" ")
         try:
             ppid = int(head)
         except ValueError:
-            return []
+            return None, []
         try:
             argv = shlex.split(rest)
         except ValueError:
             argv = rest.split()
         if argv and os.path.basename(argv[0]) == agent:
-            return argv
+            return pid, argv
         pid = ppid
-    return []
+    return None, []
+
+
+def agent_argv(agent):
+    return agent_proc(agent)[1]
+
+
+HEADLESS = {"claude": ("-p", "--print"), "codex": ("exec",)}
+
+
+def interactive(argv, agent):
+    """False for a headless run — one whose session is nobody's pane to restore."""
+    return not any(a in HEADLESS.get(agent, ()) for a in argv[1:])
+
+
+def cwd_stale(prev, transcript_path):
+    """Whether the agent's cwd must be re-read (an lsof, a few ms) for this event.
+    The transcript lives under the slug of the agent's cwd and MOVES with it — a
+    session that enters a worktree carries its transcript along — so an unchanged
+    transcript path means an unchanged cwd."""
+    return (not prev.get("agent_cwd")
+            or prev.get("transcript_path") != transcript_path)
+
+
+def proc_cwd(pid):
+    """The real working directory of a process, or None."""
+    if not pid:
+        return None
+    try:
+        out = subprocess.run(["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
+                             capture_output=True, text=True, timeout=5).stdout
+    except Exception:
+        return None
+    for line in out.splitlines():
+        if line.startswith("n/"):
+            return line[1:]
+    return None
+
+
+JOURNAL_KEEP = 200
+
+
+def journal(path, record, prev):
+    """Append the record to the pane's journal when the session id or the agent cwd
+    changed; rewrite it trimmed when it grows past JOURNAL_KEEP lines."""
+    same = (prev.get("claude_session_id") == record["claude_session_id"]
+            and prev.get("agent_cwd") == record["agent_cwd"]
+            and prev.get("agent") == record["agent"])
+    if same:
+        return
+    line = json.dumps(record) + "\n"
+    try:
+        with open(path, "a") as fh:
+            fh.write(line)
+        with open(path) as fh:
+            lines = fh.readlines()
+        if len(lines) > JOURNAL_KEEP * 2:
+            tmp = path + ".tmp"
+            with open(tmp, "w") as fh:
+                fh.writelines(lines[-JOURNAL_KEEP:])
+            os.replace(tmp, path)
+    except Exception:
+        pass
 
 
 def main() -> None:
@@ -123,20 +185,33 @@ def main() -> None:
     except Exception:
         pass
     event = data.get("source") or data.get("hook_event_name") or ""
-    if event == "SessionStart" or prev.get("agent") != agent or "resume_flags" not in prev:
-        flags = norm_flags(agent_argv(agent)[1:], agent)
+    transcript = data.get("transcript_path") or ""
+    fresh = (event == "SessionStart" or prev.get("agent") != agent
+             or "resume_flags" not in prev)
+    need_cwd = cwd_stale(prev, transcript)
+    pid, argv = (None, [])
+    if fresh or need_cwd or prev.get("claude_session_id") != sid:
+        pid, argv = agent_proc(agent)
+        if argv and not interactive(argv, agent):
+            return
+    if fresh:
+        flags = norm_flags(argv[1:], agent)
     else:
         flags = prev.get("resume_flags") or []
+    agent_cwd = proc_cwd(pid) if need_cwd else prev.get("agent_cwd")
+    if not agent_cwd:
+        agent_cwd = prev.get("agent_cwd") or None
 
     record = {
         "agent": agent,
         "resume_flags": flags,
+        "agent_cwd": agent_cwd,
         "pane_uuid": pane,
         "workspace_id": os.environ.get("AGTERM_WORKSPACE_ID") or None,
         "window_id": os.environ.get("AGTERM_WINDOW_ID") or None,
         "pane_role": role,
         "claude_session_id": sid,
-        "transcript_path": data.get("transcript_path") or "",
+        "transcript_path": transcript,
         "cwd": data.get("cwd") or "",
         "source": event,
         "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -152,6 +227,8 @@ def main() -> None:
             os.unlink(tmp)  # type: ignore[name-defined]
         except Exception:
             pass
+        return
+    journal(target[:-len(".json")] + ".history.jsonl", record, prev)
 
 
 if __name__ == "__main__":

@@ -42,6 +42,48 @@ resumed with the wrong one.
   receives the exact `session_id` on stdin. Claude Code re-reads hooks per event, so
   a newly-installed hook captures **already-running** sessions on their next activity.
 
+## Live sessions mode (agterm 0.26+)
+
+agterm's **Live sessions** restore mode wraps every pane in a zmx daemon, so a clean quit
+and relaunch reattaches the same running agents — nothing to restore. It does not survive
+a reboot: the daemons die with the machine, and agterm recreates each one running the
+pane's **captured argv**. For an agent pane that is a bare `claude` (a brand-new session)
+or a `claude --resume <ancestor>` left over from an earlier restore — the wrong session
+either way, and its hook then overwrites the pane's record with that wrong id. Two
+defences, both wired by `install`:
+
+- **agterm's `restore-denylist.conf` lists `claude` and `codex`.** A denylisted program
+  comes back as a plain shell in every restore mode, which is exactly what `restore`
+  types into. Read at agterm's next launch.
+- **The pane journal.** The hook appends to `live/<pane>-<role>.history.jsonl` whenever
+  the session id or the agent's cwd changes. `restore` steps past any live record written
+  after the running agterm launched (its start time comes from `ps`) into the newest
+  journal entry from before it: a record from this launch was written by a session
+  started in this launch — agterm's replay, or one you started and closed — never the
+  one the pane held before the restart. `--as-of <snapshot file | 2026-09-05T12:04:01Z>`
+  moves that cutoff by hand; the plan marks such lines `[journal]`.
+
+## The agent has its own working directory
+
+`claude --resume <id>` finds a session from any directory, but **continues it in the
+directory it is run from**: the transcript moves to that directory's project slug and
+every tool call runs there. A session that entered a git worktree (EnterWorktree) lives
+under that worktree now — its transcript moved with it, which is why `/resume` in the
+parent checkout no longer lists it — so resuming it from the pane's shell cwd would be the
+right history in the wrong place.
+
+The hook therefore records the agent process's **real cwd** (`agent_cwd`, read with
+`lsof` off the pid it already walks to for the flags) and `restore` types
+`cd <agent_cwd> && claude --resume …` whenever that differs from the pane's shell cwd.
+The hook payload's own `cwd` is not that: it follows the Bash tool's `cd`. The cwd is
+re-read only when the transcript path changes — it lives under the cwd's slug and moves
+with it — so the lsof is paid once per move, not per event. `status` shows
+`agent cwd: …` next to a pane whose agent has wandered off.
+
+**Headless agents are ignored.** A `claude -p`/`--print` or `codex exec` launched from
+inside a session inherits its `AGTERM_SESSION_ID`; without this it would overwrite the
+pane's record with a throwaway id on every subagent or script run.
+
 ## Snapshots are not automatic — the hook and the snapshot are different things
 
 The hook writes one live record per pane on every session event, so `pane -> session id`
@@ -66,7 +108,8 @@ value is kept (`--model sonnet` survives as a pair).
 
 Every token is shell-quoted. The words come from a pane's argv, so an apostrophe — "the
 repo's tooling" — leaves the shell at a `quote>` continuation with nothing run, and a
-backtick would be command substitution rather than text. `test_resume_cmd.py` covers both.
+backtick would be command substitution rather than text. `test_resume_cmd.py` covers both; `test_v2.py` covers the `cd`, the journal rule, the
+headless filter and `--as-of`.
 
 ## The resume prompt
 
@@ -94,12 +137,12 @@ the skill directory:
 ```
 agterm-backup install            # wire the capture hook into ~/.claude/settings.json + make state dirs
 agterm-backup status             # coverage: which running claude panes are captured
-agterm-backup restore [--dry-run] [--yes]   # after restart: resume every captured session in its pane
+agterm-backup restore [--dry-run] [--yes] [--as-of TIME|SNAPSHOT]   # after restart: resume every captured session in its pane
 agterm-backup snap [--harvest]   # optional: freeze a snapshot (see "The snapshot is optional")
 ```
 
-State lives in `~/.agterm-backup/` (`live/` = per-pane hook captures, `snapshots/` =
-frozen backups, `snapshot.json` = latest).
+State lives in `~/.agterm-backup/` (`live/` = per-pane hook captures and their
+`.history.jsonl` journals, `snapshots/` = frozen backups, `snapshot.json` = latest).
 
 ## Capture
 
@@ -108,7 +151,8 @@ Stop. Every session then records, into `live/<pane>-<role>.json` on its own even
 
 - `AGTERM_SESSION_ID -> agent session_id` — the join key,
 - the agent's **launch flags** (`--dangerously-skip-permissions`, `--model sonnet`, …),
-  read off the agent process's argv by walking up from the hook.
+  read off the agent process's argv by walking up from the hook,
+- the agent's **real cwd** (see "The agent has its own working directory").
 
 Zero interaction, no injection, and it is written continuously — so a crash with no
 warning costs nothing. A split pane's second agent shares the session's
@@ -149,9 +193,10 @@ having for two things:
 ## Notes
 
 - `restore` only injects into a pane sitting at a shell prompt; a pane already running
-  an agent is skipped (so re-running restore is safe). agterm's own "restore running
-  commands" setting may beat it to the punch — then every pane reports as skipped and
-  there is nothing to do.
+  an agent is skipped (so re-running restore is safe). In Live sessions mode after a
+  clean quit + relaunch every agent is still running — every pane reports as skipped and
+  there is nothing to do. After a reboot the agent panes are plain shells (the denylist)
+  and `restore` fills them.
 - Anything that re-enters an existing session (`--resume`/`-r` with its id, `--continue`,
   `--fork-session`; codex's `resume`/`fork`/`--last`) is stripped from the recorded
   flags. It has to be: `restore` supplies its own `--resume`, claude honours the LAST
