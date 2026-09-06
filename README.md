@@ -2,10 +2,30 @@
 
 A collection of Claude Code skills that nobody asked for, but everyone deserves.
 
+Most of them exist because I run several Claude Code and Codex sessions side by side in
+[agterm](https://github.com/umputun/agterm) all day, and the seams between them — restarts,
+forks, hand-offs, reviews, memory rot — needed tooling. Installs as a plugin into Claude Code
+and Codex CLI.
+
+| Skill                             | One line                                                                                     |
+| --------------------------------- | -------------------------------------------------------------------------------------------- |
+| [agent-pm](#agent-pm)             | Claude as a manager that only delegates: a fleet of worker sessions, briefs, gates, recovery  |
+| [peer-chat](#peer-chat)           | Claude Code and Codex talk to each other across a split pane                                 |
+| [agterm-backup](#agterm-backup)   | Reboot the Mac, get every running Claude/Codex session back resumed in its pane              |
+| [agterm-fork](#agterm-fork)       | Fork a live session into a sibling with the whole conversation                               |
+| [agterm-archive](#agterm-archive) | Park a whole workspace on disk, restore it later with every agent resumed                   |
+| [memory-review](#memory-review)   | Turn an agent's memory pile into one annotatable document, apply your verdicts safely       |
+| [revdiff-ru](#revdiff-ru)         | Code review with everything but the code translated to Russian, line numbers intact         |
+| [decomment](#decomment)           | Strip the comments an agent left that just restate the code                                 |
+
+Requirements vary by skill and are listed per skill below; the agterm ones need
+[agterm](https://github.com/umputun/agterm) on macOS, the review ones need
+[revdiff](https://github.com/umputun/revdiff).
+
 ## Installation
 
-This repo is a Claude Code plugin marketplace with two plugins: **bos** (the general set) and
-**bosp** (a currently empty bundle reserved for personal integrations).
+This repo is a Claude Code plugin marketplace. The plugin you want is **bos**; a second one,
+**bosp**, is a reserved slot for personal integrations and is empty.
 
 ```
 /plugin marketplace add isachivka/beware-of-skills
@@ -218,10 +238,6 @@ kept, which is where you correct its taste.
 
 **Triggers:** `/bos:decomment`, "убери бессмысленные комменты", "the agent commented every
 line".
-
-## Skills — `bosp` (personal)
-
-No skills are currently published in this bundle.
 
 ## Contributing
 
