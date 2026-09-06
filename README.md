@@ -1,8 +1,8 @@
 # beware-of-skills
 
-A collection of Claude Code skills that nobody asked for, but everyone deserves.
+Claude Code and Codex CLI skills for working with many agent sessions at once.
 
-Most of them exist because I run several Claude Code and Codex sessions side by side in
+They exist because I run several Claude Code and Codex sessions side by side in
 [agterm](https://github.com/umputun/agterm) all day, and the seams between them — restarts,
 forks, hand-offs, reviews, memory rot — needed tooling. Installs as a plugin into Claude Code
 and Codex CLI.
