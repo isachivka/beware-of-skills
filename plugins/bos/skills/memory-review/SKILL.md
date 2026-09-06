@@ -8,8 +8,8 @@ description: >
   somewhere else.
 when_to_use: >
   Trigger on: memory review, review my memories, prune memory, clean up memory, audit
-  memory, memory got stale, too many memories, "что в моей памяти", "почисти память",
-  "разберём память", memories out of date, memory says X but the code says Y.
+  memory, memory got stale, too many memories, "what is in my memory", "clean up my memory",
+  "let's go through the memories", memories out of date, memory says X but the code says Y.
 allowed-tools: Bash, Read, Write, Edit
 ---
 

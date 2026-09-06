@@ -1,6 +1,6 @@
 ---
 name: agent-pm
-description: Use when the user opens a terminal with only a manager/PM agent and wants work delegated to other Claude agents in agterm sessions instead of done directly — "ты менеджер", "ты PM", "оркестрируй агентов", "подними работников", "делегируй", "agent-pm". Also when supervising an existing fleet of agterm worker sessions through a task or initiative.
+description: Use when the user opens a terminal with only a manager/PM agent and wants work delegated to other Claude agents in agterm sessions instead of done directly — "you are the manager", "you are the PM", "orchestrate the agents", "spin up workers", "delegate", "agent-pm". Also when supervising an existing fleet of agterm worker sessions through a task or initiative.
 ---
 
 # Agent PM — orchestrating worker agents in agterm sessions

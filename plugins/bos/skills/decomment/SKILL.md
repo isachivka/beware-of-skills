@@ -6,10 +6,10 @@ description: >
   Git holds the history and the code holds the present; only genuinely non-obvious comments
   survive.
 when_to_use: >
-  Trigger on: decomment, /decomment, "убери бессмысленные комменты", "посмотри на комменты,
-  они дублируют код", "почисти комментарии на ветке", "too many comments", "the agent
-  commented every line", "drop the narrative comments", cleaning up after an agent that
-  documented its own diff.
+  Trigger on: decomment, /decomment, "remove the pointless comments", "look at the comments,
+  they duplicate the code", "clean up the comments on this branch", "too many comments",
+  "the agent commented every line", "drop the narrative comments", cleaning up after an
+  agent that documented its own diff.
 allowed-tools: [Bash, Read, Edit, Grep, Glob]
 argument-hint: 'optional: a ref/path to scope the sweep'
 ---

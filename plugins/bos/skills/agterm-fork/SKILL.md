@@ -7,9 +7,9 @@ description: >
   The source session is untouched. Also wires a "Fork session" entry into agterm's
   custom-command palette.
 when_to_use: >
-  Trigger on: agterm-fork, /agterm-fork, "форкни сессию", "отпочкуй эту сессию",
-  "fork this session", "продолжи это в соседней вкладке", branch the current conversation
-  into a parallel session, add the fork command to the agterm palette.
+  Trigger on: agterm-fork, /agterm-fork, "fork this session", "spin off this session",
+  "continue this in a sibling tab", branch the current conversation into a parallel
+  session, add the fork command to the agterm palette.
 allowed-tools: [Bash]
 ---
 

@@ -19,7 +19,7 @@ import sys
 STRUCTURAL = ("diff --git", "index ", "--- ", "+++ ", "@@", "new file mode",
               "deleted file mode", "similarity index", "rename from", "rename to",
               "old mode", "new mode", "Binary files", "\\ No newline")
-LETTERS = re.compile(r"[A-Za-zЀ-ӿ]{3}")
+LETTERS = re.compile(r"[A-Za-z\u0400-\u04ff]{3}")
 
 
 def is_structural(line):

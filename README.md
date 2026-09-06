@@ -58,11 +58,11 @@ Born from a real production day: a frontend redesign shipped through 3 feedback 
 
 **Requires:** the `agterm` skill (all terminal mechanics are delegated to it) and a `claude_yolo` alias (claude with permission checks bypassed).
 
-**Triggers:** "ты менеджер", "ты PM", "оркестрируй агентов", "подними работников", "agent-pm"
+**Triggers:** "you are the manager", "you are the PM", "orchestrate the agents", "spin up workers", "agent-pm"
 
 **Example:**
 
-> *You:* Ты менеджер по делам document-restoration. Ты ничего не делаешь руками — только даёшь инструкции агентам через agterm и проверяешь их работу.
+> *You:* You are the manager for document-restoration. You do nothing by hand — you only brief the agents through agterm and check their work.
 > *Claude:* *(maps the sessions, asks who is who, and starts running the show)*
 
 ### peer-chat
@@ -140,7 +140,7 @@ really landed rather than assuming your home directory is versioned.
 **Requires:** Claude Code. The review step assumes the `revdiff` skill; any annotation tool
 works if you can get line-numbered notes back.
 
-**Triggers:** "memory review", "почисти память", "review my memories", "prune memory",
+**Triggers:** "memory review", "clean up my memory", "review my memories", "prune memory",
 "audit memory", memories look stale or contradict the code.
 
 ### revdiff-ru
@@ -159,7 +159,7 @@ stdin, so a piped patch dies with `--stdin requires piped or redirected input`.
 
 String literals stay in English on purpose — they're code, and translating them changes behavior.
 
-**Triggers:** `/revdiff-ru`, "ревью на русском", "revdiff по-русски", "переведи диф и открой
+**Triggers:** `/revdiff-ru`, "review this diff in Russian", "translate the diff and open
 revdiff".
 
 ### agterm-fork
@@ -188,7 +188,7 @@ answers "full session" for you, after waiting out the boot.
 Works only inside agterm, and only alongside `agterm-backup`: a session cannot know its own
 claude id, so it is read from the live record that skill's hook writes.
 
-**Triggers:** `/bos:agterm-fork`, "форкни сессию", "fork this session".
+**Triggers:** `/bos:agterm-fork`, "fork this session", "continue this in a sibling tab".
 
 ### agterm-archive
 
@@ -216,7 +216,7 @@ in the meantime. Complements `agterm-backup` rather than overlapping it: backup 
 is open across a restart, archive covers what you deliberately closed. Non-claude panes come
 back as shells in the right directory — a snapshot is not a checkpoint.
 
-**Triggers:** `/bos:agterm-archive`, "заархивируй воркспейс", "верни воркспейс из архива".
+**Triggers:** `/bos:agterm-archive`, "archive this workspace", "bring the workspace back from the archive".
 
 ### decomment
 
@@ -236,7 +236,7 @@ agent welded one useful sentence to one worthless one, it trims to the survivor 
 keeping the pair. It proposes the list first — cut, trim, keep, plus what it nearly cut and
 kept, which is where you correct its taste.
 
-**Triggers:** `/bos:decomment`, "убери бессмысленные комменты", "the agent commented every
+**Triggers:** `/bos:decomment`, "remove the pointless comments", "the agent commented every
 line".
 
 ## Contributing

@@ -6,9 +6,9 @@ description: >
   every claude resumed where it left off. For workspaces that are done for now but not
   done for good.
 when_to_use: >
-  Trigger on: agterm-archive, /agterm-archive, "заархивируй воркспейс", "закрой воркспейс
-  но запомни", "верни воркспейс из архива", "убери проект из терминала", archive a
-  workspace, restore an archived workspace, park a project.
+  Trigger on: agterm-archive, /agterm-archive, "archive this workspace", "close the workspace
+  but remember it", "bring the workspace back from the archive", "get this project out of the
+  terminal", archive a workspace, restore an archived workspace, park a project.
 allowed-tools: [Bash]
 ---
 

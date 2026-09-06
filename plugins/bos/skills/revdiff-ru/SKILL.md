@@ -5,8 +5,8 @@ description: >
   numbering preserved 1:1 so annotations map back to the real files. One command does the
   translation; then /revdiff:revdiff opens the result.
 when_to_use: >
-  Trigger on: revdiff-ru, /revdiff-ru, "ревью на русском", "revdiff по-русски",
-  "переведи диф и открой revdiff", "review this diff in Russian".
+  Trigger on: revdiff-ru, /revdiff-ru, "review this diff in Russian", "revdiff in Russian",
+  "translate the diff and open revdiff".
 allowed-tools: [Bash, Skill]
 argument-hint: 'optional: ref(s) or file path'
 ---

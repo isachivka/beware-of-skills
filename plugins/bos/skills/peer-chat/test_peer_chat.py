@@ -1607,7 +1607,7 @@ class TypeBodyTests(unittest.TestCase):
         )
 
     def test_overlong_unicode_token_uses_utf8_safe_bounded_events(self) -> None:
-        message = "ж" * TYPE_CHUNK_BYTES
+        message = "\u0436" * TYPE_CHUNK_BYTES  # two-byte UTF-8 letter
 
         chunks = TEXT_CHUNKS(message)
 
