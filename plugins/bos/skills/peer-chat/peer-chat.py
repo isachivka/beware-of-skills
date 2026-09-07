@@ -49,7 +49,8 @@ CODEX_EMPTY_PROMPT = "Ask Codex to do anything"
 # therefore fails closed instead of weakening the live-prompt guard.
 CODEX_FOOTER_RE = re.compile(r"^ {2}\S.*$")
 CLAUDE_PROMPT_RE = re.compile(r"^\s*❯[\s ]*(.*?)\s*$")
-CLAUDE_FOOTER_RE = re.compile(r"^ {2}\S.*$")
+# status-line commands can add padding beyond Claude Code's two-space indent.
+CLAUDE_FOOTER_RE = re.compile(r"^ {2,}\S.*$")
 CLAUDE_EMPTY_PROMPTS = {
     "",
     "Press up to edit queued messages",
@@ -412,8 +413,8 @@ def pane_reachable(sid: str, profile: Profile, window: str | None = None):
 
     LOCAL PATCH (not upstream): agterm types into and reads a hidden split happily, but
     `surface cursor` on one fails with "failed to read cursor position" — and that is the
-    check proving the composer is empty. A codex pane the user has collapsed is therefore
-    unreachable although it is alive and listening.
+    check proving the composer is empty. A collapsed Codex pane is otherwise unreachable
+    although it is alive and listening.
     """
     try:
         info = find_node(sid, window)
@@ -430,7 +431,7 @@ def pane_reachable(sid: str, profile: Profile, window: str | None = None):
         try:
             ctl("session", "split", "visibility", "off", "--target", sid,
                 *window_option(window))
-        except Exception:
+        except (OSError, subprocess.SubprocessError, ValueError, RuntimeError):
             pass          # leaving it visible is cosmetic, never a send failure
 
 
@@ -562,6 +563,37 @@ def composer_is_empty(profile: Profile, content: str) -> bool:
     return joined in CLAUDE_EMPTY_PROMPTS or bool(
         CLAUDE_STARTUP_HINT_RE.fullmatch(joined)
     )
+
+
+def suggestion_probe(
+    sid: str, profile: Profile, column: int, window: str | None = None
+) -> bool:
+    """Is the text in the composer a greyed suggestion rather than someone's draft?
+
+    LOCAL PATCH (not upstream). Claude Code draws a suggestion into an idle composer and
+    `session text` renders it exactly like typed input; upstream only recognises the
+    startup form `Try "..."`, while a suggestion carried over from earlier work is
+    arbitrary prose in the user's own language, so no literal set can cover it. The caret
+    alone does not settle it either — a real draft with the caret sent home also sits at
+    the empty column, which is why upstream refuses that case and this keeps refusing it.
+
+    What does settle it is a keystroke: a space replaces a suggestion outright, and only
+    joins a draft. Both outcomes are undone with one backspace, so the user's draft is
+    exactly as it was whichever way this goes. Fails closed: any trouble reading or
+    typing means "treat it as a draft".
+    """
+    if profile.agent != "claude" or column != EMPTY_CURSOR_COLUMN:
+        return False
+    try:
+        type_text(sid, profile, " ", window)
+        time.sleep(COMPOSER_SETTLE_DELAY)
+        probed = live_prompt_text(profile, pane_text(sid, profile, window))
+        gone = probed is not None and probed.strip() == ""
+        type_text(sid, profile, "\x7f", window)
+        time.sleep(COMPOSER_SETTLE_DELAY)
+        return gone
+    except (OSError, subprocess.SubprocessError, ValueError, RuntimeError):
+        return False
 
 
 def composer_state(
@@ -1008,11 +1040,15 @@ def _send_visible(
                 "input, a trailing modal or status row, or an unknown prompt glyph); "
                 "nothing was typed" + describe_tail(pane)
             )
+        column = cursor_column(sid, profile, window)
         if not composer_is_empty(profile, empty_text):
-            raise PromptBlocked(
-                "target composer contains text; nothing was typed"
-            )
-        if cursor_column(sid, profile, window) != EMPTY_CURSOR_COLUMN:
+            if not suggestion_probe(sid, profile, column, window):
+                raise PromptBlocked(
+                    "target composer contains text; nothing was typed"
+                    + describe_tail(pane)
+                )
+            empty_text = ""      # what the first keystroke will leave behind
+        if column != EMPTY_CURSOR_COLUMN:
             raise PromptBlocked(
                 "target composer is not confirmably empty; nothing was typed"
             )

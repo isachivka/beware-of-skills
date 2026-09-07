@@ -6,9 +6,11 @@ allowed-tools: Bash, Read, Grep, Glob
 
 # Peer chat, Claude side
 
-> Vendored from `umputun/agterm` cookbook `two-agent-chat` (MIT), plus two local patches
-> marked `LOCAL PATCH` in `peer-chat.py`: a collapsed split is shown for the duration of a
-> send (`surface cursor` cannot measure a hidden surface, so a collapsed Codex pane is
+> Vendored from `umputun/agterm` cookbook `two-agent-chat` (MIT), plus three local patches
+> marked `LOCAL PATCH` in `peer-chat.py`: a greyed suggestion in an idle Claude composer is
+> told apart from a real draft by typing one space and undoing it (upstream recognises only
+> the startup form `Try "..."`, so any other suggestion blocked every send); a collapsed
+> split is shown for the duration of a send (`surface cursor` cannot measure a hidden surface, so a collapsed Codex pane is
 > otherwise unreachable although it is alive), and a "prompt is not recognisable" refusal
 > quotes the last rows of the pane, because that reason lists four causes and names none.
 >
@@ -16,7 +18,6 @@ allowed-tools: Bash, Read, Grep, Glob
 > `~/.local/bin/peer-chat.py` a wrapper that execs the copy in the newest installed plugin,
 > never a second frozen copy: when those diverged, Claude ran the patched script and Codex
 > an older one, and every long message from Codex lost chunks.
-
 
 Talk with Codex in the split pane. The user reads both panes, so the conversation itself is the
 result even when code comes out of it.
