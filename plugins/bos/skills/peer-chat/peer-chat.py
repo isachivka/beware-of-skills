@@ -44,6 +44,11 @@ CODEX_PROMPT_RE = re.compile(r"^[›»][\s ]*(.*?)\s*$")
 CODEX_SHELL_PROMPT_RE = re.compile(r"^![\s ]*(.*?)\s*$")
 CODEX_CHOICE_RE = re.compile(r"^\d+\.\s")
 CODEX_EMPTY_PROMPT = "Ask Codex to do anything"
+# LOCAL PATCH (not upstream): a narrow pane truncates that placeholder — a 44-column split
+# renders `› Ask Codex to do any` — and an equality test then reads it as somebody's draft
+# and refuses the send. Match a prefix instead, long enough that a real draft could not be
+# mistaken for one.
+CODEX_PLACEHOLDER_MIN = 8
 # Codex prefixes footer rows with two spaces. Only the final row is stripped: a
 # multi-row shortcut overlay is indistinguishable from indented modal choices and
 # therefore fails closed instead of weakening the live-prompt guard.
@@ -555,11 +560,21 @@ def live_prompt_text(profile: Profile, text: str) -> str | None:
     return claude_live_prompt_text(text)
 
 
+def is_truncated_codex_placeholder(joined: str) -> bool:
+    """Codex's own placeholder, cut short by a narrow pane (with or without an ellipsis)."""
+    text = joined.rstrip("…").rstrip()
+    return (
+        len(text) >= CODEX_PLACEHOLDER_MIN
+        and text != CODEX_EMPTY_PROMPT
+        and CODEX_EMPTY_PROMPT.startswith(text)
+    )
+
+
 def composer_is_empty(profile: Profile, content: str) -> bool:
     """Recognise the empty input content instead of inferring it from the caret."""
     joined = " ".join(content.splitlines())
     if profile.agent == "codex":
-        return joined == CODEX_EMPTY_PROMPT
+        return joined == CODEX_EMPTY_PROMPT or is_truncated_codex_placeholder(joined)
     return joined in CLAUDE_EMPTY_PROMPTS or bool(
         CLAUDE_STARTUP_HINT_RE.fullmatch(joined)
     )
@@ -570,7 +585,7 @@ def suggestion_probe(
 ) -> bool:
     """Is the text in the composer a greyed suggestion rather than someone's draft?
 
-    LOCAL PATCH (not upstream). Claude Code draws a suggestion into an idle composer and
+    LOCAL PATCH (not upstream). Both agents draw a suggestion into an idle composer and
     `session text` renders it exactly like typed input; upstream only recognises the
     startup form `Try "..."`, while a suggestion carried over from earlier work is
     arbitrary prose in the user's own language, so no literal set can cover it. The caret
@@ -582,7 +597,7 @@ def suggestion_probe(
     exactly as it was whichever way this goes. Fails closed: any trouble reading or
     typing means "treat it as a draft".
     """
-    if profile.agent != "claude" or column != EMPTY_CURSOR_COLUMN:
+    if column != EMPTY_CURSOR_COLUMN:
         return False
     try:
         type_text(sid, profile, " ", window)

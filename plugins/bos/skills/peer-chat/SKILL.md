@@ -6,10 +6,12 @@ allowed-tools: Bash, Read, Grep, Glob
 
 # Peer chat, Claude side
 
-> Vendored from `umputun/agterm` cookbook `two-agent-chat` (MIT), plus three local patches
-> marked `LOCAL PATCH` in `peer-chat.py`: a greyed suggestion in an idle Claude composer is
-> told apart from a real draft by typing one space and undoing it (upstream recognises only
-> the startup form `Try "..."`, so any other suggestion blocked every send); a collapsed
+> Vendored from `umputun/agterm` cookbook `two-agent-chat` (MIT), plus four local patches
+> marked `LOCAL PATCH` in `peer-chat.py`: a greyed suggestion in an idle composer is told
+> apart from a real draft by typing one space and undoing it (upstream recognises only the
+> startup form `Try "..."`, so any other suggestion blocked every send), Codex's own
+> placeholder is matched as a prefix because a narrow pane truncates it to
+> `Ask Codex to do any`; a collapsed
 > split is shown for the duration of a send (`surface cursor` cannot measure a hidden surface, so a collapsed Codex pane is
 > otherwise unreachable although it is alive), and a "prompt is not recognisable" refusal
 > quotes the last rows of the pane, because that reason lists four causes and names none.

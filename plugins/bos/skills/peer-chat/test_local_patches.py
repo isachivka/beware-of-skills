@@ -63,11 +63,15 @@ class SuggestionProbeTests(unittest.TestCase):
             self.assertFalse(PC.suggestion_probe("sid", CLAUDE, 12))
         type_text.assert_not_called()
 
-    def test_codex_is_never_probed(self):
-        type_text = Mock()
-        with patch.dict(PC.suggestion_probe.__globals__, {"type_text": type_text}):
-            self.assertFalse(PC.suggestion_probe("sid", CODEX, PC.EMPTY_CURSOR_COLUMN))
-        type_text.assert_not_called()
+    def test_codex_is_probed_too(self):
+        typed = []
+        with patch.dict(PC.suggestion_probe.__globals__, {
+            "type_text": Mock(side_effect=lambda s, p, t, w=None: typed.append(t)),
+            "pane_text": Mock(return_value="\u203a  \n  gpt-6-astra high \u00b7 ~/x"),
+            "time": Mock(sleep=Mock()),
+        }):
+            self.assertTrue(PC.suggestion_probe("sid", CODEX, PC.EMPTY_CURSOR_COLUMN))
+        self.assertEqual(typed, [" ", "\x7f"])
 
     def test_probe_failure_reads_as_draft(self):
         with patch.dict(PC.suggestion_probe.__globals__, {
@@ -75,6 +79,24 @@ class SuggestionProbeTests(unittest.TestCase):
             "time": Mock(sleep=Mock()),
         }):
             self.assertFalse(PC.suggestion_probe("sid", CLAUDE, PC.EMPTY_CURSOR_COLUMN))
+
+
+class CodexPlaceholderTests(unittest.TestCase):
+    """A 44-column split renders `› Ask Codex to do any`, and equality read that as a draft."""
+
+    def test_truncated_placeholder_is_empty(self):
+        for shown in ("Ask Codex to do anything", "Ask Codex to do any",
+                      "Ask Codex to do anyth…", "Ask Codex to"):
+            self.assertTrue(PC.composer_is_empty(CODEX, shown), shown)
+
+    def test_a_draft_is_not_a_placeholder(self):
+        for shown in ("Ask Cod", "one tail to remove", "Ask Codex to do anything else",
+                      "please review the diff"):
+            self.assertFalse(PC.composer_is_empty(CODEX, shown), shown)
+
+    def test_claude_is_unaffected(self):
+        self.assertFalse(PC.composer_is_empty(CLAUDE, "Ask Codex to do any"))
+        self.assertTrue(PC.composer_is_empty(CLAUDE, ""))
 
 
 class RefusalDiagnosticsTests(unittest.TestCase):
