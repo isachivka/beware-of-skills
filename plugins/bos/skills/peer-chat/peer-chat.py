@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -426,6 +427,8 @@ def pane_reachable(sid: str, profile: Profile, window: str | None = None):
         hidden = bool(info.get("hasSplit")) and not info.get("split")
     except (OSError, subprocess.SubprocessError, ValueError, RuntimeError):
         hidden = False
+    if hidden and zmx_daemon(sid, profile):
+        hidden = False        # the daemon answers for it; leave the user's layout alone
     if not (hidden and profile.pane == "right"):
         yield False
         return
@@ -599,6 +602,10 @@ def suggestion_probe(
     """
     if column != EMPTY_CURSOR_COLUMN:
         return False
+    screen = zmx_screen(sid, profile)
+    if screen:
+        # the styled screen settles it without touching the pane at all
+        return composer_row_is_dim(screen, profile)
     try:
         type_text(sid, profile, " ", window)
         time.sleep(COMPOSER_SETTLE_DELAY)
@@ -609,6 +616,92 @@ def suggestion_probe(
         return gone
     except (OSError, subprocess.SubprocessError, ValueError, RuntimeError):
         return False
+
+
+# --------------------------------------------------------------- live-session reads
+#
+# LOCAL PATCH (not upstream). With agterm's live sessions every pane's process runs in a
+# zmx daemon, and `zmx history --vt` returns the screen WITH its escape codes. Two things
+# the plain `session text` view cannot answer come out of that stream directly:
+#
+#   * a greyed suggestion is drawn dim (`ESC[2m`), a real draft is not. Verified on live
+#     panes: `❯ ESC[0m ESC[2m убери /__swap-probe из импла ESC[0m` against a draft's bare
+#     `❯ настоящий черновик`. No keystroke needed to tell them apart.
+#   * the caret position is in the stream's final `ESC[row;colH`, so a pane whose surface
+#     agterm has released (a collapsed split) can still be measured — `surface cursor`
+#     fails there with "failed to read cursor position".
+#
+# Both fall back to the older paths when live sessions are off and no daemon exists.
+
+ZMX_CANDIDATES = (
+    "/Applications/agterm.app/Contents/MacOS/zmx",
+    "zmx",
+)
+ZMX_HISTORY_TAIL = 65536
+CURSOR_REPORT_RE = re.compile(r"\x1b\[(\d+);(\d+)H")
+DIM_SPAN_RE = re.compile(r"\x1b\[2m")
+
+
+def zmx_binary() -> str | None:
+    for candidate in ZMX_CANDIDATES:
+        if os.path.sep in candidate:
+            if os.access(candidate, os.X_OK):
+                return candidate
+        elif shutil.which(candidate):
+            return candidate
+    return None
+
+
+def zmx_daemon(sid: str, profile: Profile) -> str | None:
+    """The daemon holding this pane, from agterm's own view of the two."""
+    try:
+        listing = ctl("zmx", "list")
+    except (OSError, subprocess.SubprocessError, ValueError, RuntimeError):
+        return None
+    want_pane = "(right)" if profile.pane == "right" else "(left)"
+    for line in listing.splitlines():
+        if sid[:8].upper() in line.upper() and want_pane in line:
+            return line.split()[0]
+    return None
+
+
+def zmx_screen(sid: str, profile: Profile) -> str | None:
+    binary, name = zmx_binary(), zmx_daemon(sid, profile)
+    if not binary or not name:
+        return None
+    try:
+        out = subprocess.run([binary, "history", name, "--vt"], capture_output=True,
+                             timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode:
+        return None
+    return out.stdout[-ZMX_HISTORY_TAIL:].decode("utf-8", "replace")
+
+
+def zmx_cursor_column(screen: str) -> int | None:
+    """The caret column agterm would report, from the stream's last position report."""
+    reports = CURSOR_REPORT_RE.findall(screen or "")
+    if not reports:
+        return None
+    return max(int(reports[-1][1]) - 1, 0)
+
+
+def composer_row_is_dim(screen: str, profile: Profile) -> bool:
+    """Is the text on the composer row drawn dim, i.e. a suggestion rather than input?"""
+    glyphs = ("›", "»") if profile.agent == "codex" else ("❯",)
+    index = max((screen.rfind(g) for g in glyphs), default=-1)
+    if index < 0:
+        return False
+    row = screen[index:]
+    row = row.split("\r\n")[0].split("\n")[0]
+    body = row[1:]
+    if not DIM_SPAN_RE.search(body):
+        return False
+    # dim must open before any printable text on the row, not after it
+    before_dim = DIM_SPAN_RE.split(body, maxsplit=1)[0]
+    stripped = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", before_dim)
+    return stripped.strip() == ""
 
 
 def composer_state(

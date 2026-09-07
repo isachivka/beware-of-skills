@@ -6,7 +6,7 @@ allowed-tools: Bash, Read, Grep, Glob
 
 # Peer chat, Claude side
 
-> Vendored from `umputun/agterm` cookbook `two-agent-chat` (MIT), plus four local patches
+> Vendored from `umputun/agterm` cookbook `two-agent-chat` (MIT), plus the local patches
 > marked `LOCAL PATCH` in `peer-chat.py`: a greyed suggestion in an idle composer is told
 > apart from a real draft by typing one space and undoing it (upstream recognises only the
 > startup form `Try "..."`, so any other suggestion blocked every send), Codex's own

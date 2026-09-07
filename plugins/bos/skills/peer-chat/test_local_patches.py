@@ -99,6 +99,57 @@ class CodexPlaceholderTests(unittest.TestCase):
         self.assertTrue(PC.composer_is_empty(CLAUDE, ""))
 
 
+DRAFT_SCREEN = (
+    "─────\x1b[0m\r\n❯\xa0настоящий черновик\r\n"
+    "\x1b[0m\x1b[38;2;136;136;136m─────\x1b[0m\r\n\x1b[72;21H"
+)
+SUGGESTION_SCREEN = (
+    "─────\x1b[0m\r\n❯ \x1b[0m\x1b[2mубери /__swap-probe из импла\x1b[0m\r\n"
+    "\x1b[0m\x1b[38;2;136;136;136m─────\x1b[0m\r\n\x1b[72;3H"
+)
+CODEX_SUGGESTION_SCREEN = (
+    "\x1b[0m\x1b[1m\x1b[48;2;72;72;72m›\x1b[0m\x1b[48;2;72;72;72m "
+    "\x1b[0m\x1b[2m\x1b[48;2;72;72;72mAsk Codex to do any\x1b[0m\r\n\x1b[73;3H"
+)
+
+
+class LiveScreenTests(unittest.TestCase):
+    """agterm's live sessions keep every pane in a zmx daemon whose `history --vt` carries
+    the styling, which is what tells a suggestion from a draft without touching the pane."""
+
+    def test_dim_row_is_a_suggestion(self):
+        self.assertTrue(PC.composer_row_is_dim(SUGGESTION_SCREEN, CLAUDE))
+        self.assertTrue(PC.composer_row_is_dim(CODEX_SUGGESTION_SCREEN, CODEX))
+
+    def test_plain_row_is_a_draft(self):
+        self.assertFalse(PC.composer_row_is_dim(DRAFT_SCREEN, CLAUDE))
+
+    def test_cursor_comes_out_of_the_stream(self):
+        self.assertEqual(PC.zmx_cursor_column(DRAFT_SCREEN), 20)
+        self.assertEqual(PC.zmx_cursor_column(SUGGESTION_SCREEN), 2)
+        self.assertIsNone(PC.zmx_cursor_column("no report here"))
+
+    def test_probe_prefers_the_screen_over_a_keystroke(self):
+        type_text = Mock()
+        with patch.dict(PC.suggestion_probe.__globals__, {
+            "zmx_screen": Mock(return_value=SUGGESTION_SCREEN),
+            "type_text": type_text,
+        }):
+            self.assertTrue(PC.suggestion_probe("sid", CLAUDE, PC.EMPTY_CURSOR_COLUMN))
+        type_text.assert_not_called()
+
+    def test_no_daemon_falls_back_to_the_keystroke(self):
+        typed = []
+        with patch.dict(PC.suggestion_probe.__globals__, {
+            "zmx_screen": Mock(return_value=None),
+            "type_text": Mock(side_effect=lambda s, p, t, w=None: typed.append(t)),
+            "pane_text": Mock(return_value="❯ "),
+            "time": Mock(sleep=Mock()),
+        }):
+            self.assertTrue(PC.suggestion_probe("sid", CLAUDE, PC.EMPTY_CURSOR_COLUMN))
+        self.assertEqual(typed, [" ", "\x7f"])
+
+
 class RefusalDiagnosticsTests(unittest.TestCase):
     def test_refusal_quotes_the_pane(self):
         tail = PC.describe_tail("one\n\ntwo\nthree")
