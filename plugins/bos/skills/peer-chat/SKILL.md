@@ -6,20 +6,23 @@ allowed-tools: Bash, Read, Grep, Glob
 
 # Peer chat, Claude side
 
-> Vendored from `umputun/agterm` cookbook `two-agent-chat` (MIT), plus the local patches
-> marked `LOCAL PATCH` in `peer-chat.py`: a greyed suggestion in an idle composer is told
-> apart from a real draft by typing one space and undoing it (upstream recognises only the
-> startup form `Try "..."`, so any other suggestion blocked every send), Codex's own
-> placeholder is matched as a prefix because a narrow pane truncates it to
-> `Ask Codex to do any`; a collapsed
-> split is shown for the duration of a send (`surface cursor` cannot measure a hidden surface, so a collapsed Codex pane is
-> otherwise unreachable although it is alive), and a "prompt is not recognisable" refusal
-> quotes the last rows of the pane, because that reason lists four causes and names none.
+> Vendored from `umputun/agterm` cookbook `two-agent-chat` (MIT, upstream 8abf983, 2026-09-19),
+> plus the local patches marked `LOCAL PATCH` in `peer-chat.py`: Codex's placeholder is
+> accepted as a prefix because a narrow pane truncates it to `Ask Codex to do any`; a
+> collapsed split is shown for the duration of a send (`surface cursor` cannot measure a
+> hidden surface, so a collapsed Codex pane is otherwise unreachable although it is alive);
+> and a refusal quotes the last rows of the pane, because the bare reason lists four causes
+> and names none. The earlier greyed-suggestion patch is gone: upstream now gates Claude
+> sends on the caret alone, and reads the Codex composer through its idle animation.
 >
 > The script is invoked as a bare `peer-chat.py` through `PATH`. Keep
 > `~/.local/bin/peer-chat.py` a wrapper that execs the copy in the newest installed plugin,
 > never a second frozen copy: when those diverged, Claude ran the patched script and Codex
 > an older one, and every long message from Codex lost chunks.
+>
+> Re-vendoring: take upstream `peer-chat.py`, `SKILL-claude.md`, `SKILL-codex.md` and
+> `test_peer_chat.py`; reapply the `LOCAL PATCH` hunks; move the truncated-placeholder cases
+> in `test_placeholder_is_read_through_particles` to the accepted list; run both test files.
 
 Talk with Codex in the split pane. The user reads both panes, so the conversation itself is the
 result even when code comes out of it.
