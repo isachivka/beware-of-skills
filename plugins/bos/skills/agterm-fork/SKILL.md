@@ -54,3 +54,8 @@ the plugin cache path carries a commit sha and would otherwise break on every up
 
 Focus stays where it was (`--no-select`). The fork gets its own live record, so
 `agterm-backup` covers it like any other session.
+
+A palette launch is detached with no terminal, so the wrapper writes that run to
+`~/.local/state/agterm-fork/palette.log` (argv, PATH, socket, the script's output, exit code) and
+posts a "Fork session failed" notification when it exits non-zero. Read the log first when the
+palette entry seems to do nothing.
