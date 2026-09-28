@@ -11,6 +11,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import ANY, Mock, call, patch
 
@@ -47,6 +48,9 @@ PREPARE_MESSAGE = SCRIPT["prepare_message"]
 READ_MESSAGE = SCRIPT["read_message"]
 RESOLVE_WINDOW = SCRIPT["resolve_window"]
 RESOLVE_TARGET = SCRIPT["resolve_target"]
+RESOLVE_SESSION = SCRIPT["resolve_session"]
+REQUIRE_TARGET = SCRIPT["require_target"]
+BIND_PANE = SCRIPT["bind_pane"]
 RUN_MAIN = SCRIPT["run_main"]
 TARGET_PROFILE = SCRIPT["target_profile"]
 PANE_TEXT = SCRIPT["pane_text"]
@@ -54,7 +58,14 @@ NORMALIZE = SCRIPT["normalize"]
 TREE = SCRIPT["tree"]
 TYPE_TEXT = SCRIPT["type_text"]
 RULE = "─" * 40
+SPLIT_NODE = {
+    "id": "stable-session-id",
+    "hasSplit": True,
+    "foreground": ["claude"],
+    "splitForeground": ["codex"],
+}
 CODEX_FOOTER = "  repo · master · gpt-5.6 high · Context 0% used"
+CODEX_NOTICE = " " * 55 + "⚠ 1 warning · f2 to view"
 
 
 def stepping_time(step: float = 0.11) -> Mock:
@@ -516,6 +527,101 @@ class CodexLivePromptTextTests(unittest.TestCase):
                     LIVE_PROMPT_TEXT(PROFILES["codex"], screen),
                     "Ask Codex to do anything",
                 )
+
+    def test_live_prompt_accepts_two_footer_rows_below_a_blank(self) -> None:
+        screen = (
+            "› Ask Codex to do anything\n"
+            "\n"
+            "  GPT-6-Astra high · Context 100% left · /Volumes/Data/Devzone/over…\n"
+            "  ? for shortcuts\n"
+        )
+
+        self.assertEqual(
+            LIVE_PROMPT_TEXT(PROFILES["codex"], screen),
+            "Ask Codex to do anything",
+        )
+
+    def test_wrapped_composer_keeps_its_rows_above_two_footer_rows(self) -> None:
+        screen = (
+            "» Chat from Claude: a long reply whose first row wraps\n"
+            "  onto a second row and remains in the composer\n"
+            "\n"
+            "  repo · master · gpt-5.6 high\n"
+            "  Context 100% left\n"
+        )
+
+        self.assertEqual(
+            LIVE_PROMPT_TEXT(PROFILES["codex"], screen),
+            "Chat from Claude: a long reply whose first row wraps\nonto a second "
+            "row and remains in the composer",
+        )
+
+    def test_live_prompt_accepts_a_notice_alone_below_the_status_row(self) -> None:
+        screen = (
+            "› Chat from Claude: hello\n"
+            "\n"
+            "  GPT-6-Astra medium · sysadm · Context 0% used · weekly 4% left\n"
+            f"{CODEX_NOTICE}\n"
+        )
+
+        self.assertEqual(
+            LIVE_PROMPT_TEXT(PROFILES["codex"], screen), "Chat from Claude: hello"
+        )
+
+    def test_live_prompt_accepts_a_notice_beside_the_shortcut_hint(self) -> None:
+        screen = (
+            "› Ask Codex to do anything\n"
+            "\n"
+            "  GPT-6-Astra medium · sysadm · Context 0% used · weekly 4%\n"
+            "  ← for agents · ? for shortcuts                       ⚠ 1 warning · f2 to view\n"
+        )
+
+        self.assertEqual(
+            LIVE_PROMPT_TEXT(PROFILES["codex"], screen),
+            "Ask Codex to do anything",
+        )
+
+    def test_wrapped_composer_keeps_its_rows_above_a_notice_footer(self) -> None:
+        screen = (
+            "» Chat from Claude: a long reply whose first row wraps\n"
+            "  onto a second row and remains in the composer\n"
+            "\n"
+            "  repo · master · gpt-5.6 high\n"
+            f"{CODEX_NOTICE}\n"
+        )
+
+        self.assertEqual(
+            LIVE_PROMPT_TEXT(PROFILES["codex"], screen),
+            "Chat from Claude: a long reply whose first row wraps\nonto a second "
+            "row and remains in the composer",
+        )
+
+    def test_notice_without_a_status_row_is_not_live(self) -> None:
+        screen = f"› Chat from Claude: hello\n\n{CODEX_NOTICE}\n"
+
+        self.assertIsNone(LIVE_PROMPT_TEXT(PROFILES["codex"], screen))
+
+    def test_three_trailing_indented_rows_are_not_live(self) -> None:
+        screen = (
+            "» Ask Codex to do anything\n"
+            "\n"
+            "  /keymap customize\n"
+            "  repo · master · gpt-5.6 high\n"
+            "  ? / esc close\n"
+        )
+
+        self.assertIsNone(LIVE_PROMPT_TEXT(PROFILES["codex"], screen))
+
+    def test_three_trailing_rows_ending_in_a_notice_are_not_live(self) -> None:
+        screen = (
+            "» Ask Codex to do anything\n"
+            "\n"
+            "  /keymap customize\n"
+            "  repo · master · gpt-5.6 high\n"
+            f"{CODEX_NOTICE}\n"
+        )
+
+        self.assertIsNone(LIVE_PROMPT_TEXT(PROFILES["codex"], screen))
 
     def test_transcript_history_above_live_prompt_is_ignored(self) -> None:
         screen = (
@@ -2591,6 +2697,164 @@ class WindowResolutionTests(unittest.TestCase):
             RESOLVE_TARGET("session-", None, CLAUDE_PROFILE)
 
 
+class PaneResolutionTests(unittest.TestCase):
+    @staticmethod
+    def node(left: list[str], right: list[str]) -> dict[str, object]:
+        return {
+            "id": "session-full-id",
+            "hasSplit": True,
+            "foreground": left,
+            "splitForeground": right,
+        }
+
+    def resolve(
+        self,
+        target: str,
+        node: dict[str, object],
+        environment: dict[str, str] | None = None,
+    ) -> object:
+        replacements = {
+            "open_window_ids": Mock(return_value=["window-a"]),
+            "tree": Mock(return_value={"sessions": [node]}),
+        }
+        variables = {"AGTERM_SESSION_ID": "session-full", **(environment or {})}
+
+        with (
+            patch.dict(os.environ, variables, clear=True),
+            patch.dict(RESOLVE_TARGET.__globals__, replacements),
+        ):
+            profile = TARGET_PROFILE(target, None)
+            self.assertEqual(
+                RESOLVE_TARGET(None, None, profile), ("window-a", "session-full-id")
+            )
+            return BIND_PANE(node, profile)
+
+    def test_each_agent_is_found_in_either_pane(self) -> None:
+        codex = ["node", "/opt/homebrew/bin/codex"]
+        cases = (
+            ("claude", ["claude"], codex, "left"),
+            ("claude", codex, ["claude"], "right"),
+            ("codex", ["claude"], codex, "right"),
+            ("codex", codex, ["claude"], "left"),
+        )
+        for target, left, right, pane in cases:
+            with self.subTest(target=target, left=left):
+                bound = self.resolve(target, self.node(left, right))
+
+                self.assertEqual(
+                    (bound.pane, bound.label), (pane, PROFILES[target].label)
+                )
+
+    def test_far_pane_needs_the_other_agent_in_the_near_one(self) -> None:
+        # the near pane is the target's usual side; it may be a wrapper or a shell, and then the far
+        # pane running the target agent could be the caller itself.
+        for near in (["cld"], ["zsh"]):
+            cases = (
+                ("claude", self.node(near, ["claude"])),
+                ("codex", self.node(["codex"], near)),
+            )
+            for target, node in cases:
+                with (
+                    self.subTest(target=target, near=near),
+                    self.assertRaisesRegex(RuntimeError, "could be the sender"),
+                ):
+                    self.resolve(target, node)
+
+    def test_unreadable_peer_command_refuses_the_far_pane(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "could be the sender"):
+            self.resolve(
+                "claude",
+                self.node(["codex"], ["claude"]),
+                {"PEER_CHAT_CODEX_COMMAND": "two words"},
+            )
+
+    def test_own_pane_wins_whatever_the_far_pane_runs(self) -> None:
+        cases = (
+            ("codex", ["claude", "--add-dir", "/tmp/codex"], ["codex"], "right"),
+            ("claude", ["claude"], ["claude"], "left"),
+            ("codex", ["codex"], ["codex"], "right"),
+        )
+        for target, left, right, pane in cases:
+            with self.subTest(target=target, left=left, right=right):
+                self.assertEqual(self.resolve(target, self.node(left, right)).pane, pane)
+
+    def test_reversed_wrapped_sender_is_pointed_at_its_variable(self) -> None:
+        cases = (
+            ("codex", ["codex"], ["cld"], "PEER_CHAT_CLAUDE_COMMAND", "cld", "left"),
+            ("claude", ["cdx"], ["claude"], "PEER_CHAT_CODEX_COMMAND", "cdx", "right"),
+        )
+        for target, left, right, variable, wrapper, pane in cases:
+            node = self.node(left, right)
+            with self.subTest(target=target):
+                with self.assertRaises(RuntimeError) as caught:
+                    self.resolve(target, node)
+
+                self.assertIn(f"set {variable} to its name", str(caught.exception))
+                self.assertNotIn("--target-command", str(caught.exception))
+                self.assertEqual(
+                    self.resolve(target, node, {variable: wrapper}).pane, pane
+                )
+
+    def test_launch_prompt_naming_the_other_agent_does_not_move_the_target(self) -> None:
+        codex = ["node", "/opt/homebrew/bin/codex", "work with claude on this"]
+        for right in (["claude"], ["claude", "talk to codex"]):
+            node = self.node(codex, right)
+            with self.subTest(right=right):
+                self.assertEqual(self.resolve("claude", node).pane, "right")
+                self.assertEqual(self.resolve("codex", node).pane, "left")
+
+    def test_usual_pane_naming_both_agents_stays_when_it_runs_the_target(self) -> None:
+        left = ["claude", "--add-dir", "/tmp/codex"]
+        for right in (["claude"], ["node", "/opt/homebrew/bin/codex"]):
+            with self.subTest(right=right):
+                self.assertEqual(
+                    self.resolve("claude", self.node(left, right)).pane, "left"
+                )
+
+    def test_doubtful_program_keeps_the_usual_pane(self) -> None:
+        cases = (
+            (["node", "--require", "/tmp/codex", "/opt/bin/claude"], ["claude"], {}),
+            (
+                ["agent", "claude", "codex"],
+                ["agent"],
+                {"PEER_CHAT_CLAUDE_COMMAND": "agent", "PEER_CHAT_CODEX_COMMAND": "agent"},
+            ),
+        )
+        for left, right, environment in cases:
+            with self.subTest(left=left):
+                self.assertEqual(
+                    self.resolve("claude", self.node(left, right), environment).pane,
+                    "left",
+                )
+
+    def test_bound_pane_is_not_followed_after_the_agents_swap(self) -> None:
+        bound = replace(CLAUDE_PROFILE, pane="right")
+        swapped = self.node(["claude"], ["codex"])
+
+        with (
+            patch.dict(
+                REQUIRE_TARGET.__globals__, {"find_node": Mock(return_value=swapped)}
+            ),
+            self.assertRaisesRegex(RuntimeError, "target pane is not running"),
+        ):
+            REQUIRE_TARGET("session-full-id", bound)
+
+    def test_checkout_lookup_accepts_either_layout(self) -> None:
+        node = {**self.node(["codex"], ["claude"]), "cwd": os.getcwd()}
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.dict(
+                RESOLVE_SESSION.__globals__,
+                {"tree": Mock(return_value={"sessions": [node]})},
+            ),
+        ):
+            self.assertEqual(
+                RESOLVE_SESSION(None, TARGET_PROFILE("claude", None), "window-a"),
+                "session-full-id",
+            )
+
+
 class MainWindowFlowTests(unittest.TestCase):
     @staticmethod
     def args() -> argparse.Namespace:
@@ -2612,6 +2876,7 @@ class MainWindowFlowTests(unittest.TestCase):
             "resolve_target": Mock(
                 return_value=("stable-window-id", "stable-session-id")
             ),
+            "find_node": Mock(return_value=SPLIT_NODE),
             "read_message": Mock(return_value="body"),
             "send_with_retry": send_with_retry,
         }
@@ -2621,11 +2886,13 @@ class MainWindowFlowTests(unittest.TestCase):
         resolve_target = Mock(
             return_value=("stable-window-id", "stable-session-id")
         )
+        find_node = Mock(return_value=SPLIT_NODE)
         send_with_retry = Mock(return_value=4)
         replacements = {
             "parse_args": Mock(return_value=self.args()),
             "target_profile": Mock(return_value=profile),
             "resolve_target": resolve_target,
+            "find_node": find_node,
             "read_message": Mock(return_value="body"),
             "send_with_retry": send_with_retry,
         }
@@ -2639,6 +2906,7 @@ class MainWindowFlowTests(unittest.TestCase):
         resolve_target.assert_called_once_with(
             "session-prefix", "active", profile
         )
+        find_node.assert_called_once_with("stable-session-id", "stable-window-id")
         send_with_retry.assert_called_once_with(
             "stable-session-id", profile, "body", "stable-window-id", ANY
         )

@@ -1,12 +1,12 @@
 ---
 name: peer-chat
-description: 'Hold a back-and-forth conversation with the Codex TUI running in this agterm session''s split pane, as peers. Use when the user says "chat with codex", "talk to codex", "work with codex", "do this with codex", "build this with codex", "discuss this with codex", "ask codex what it thinks", or when a prompt arrives starting with "Chat from Codex:". Not for a one-shot task handed to codex, and not for a read-only second opinion.'
+description: 'Hold a back-and-forth conversation with the Codex TUI running in the other pane of this agterm session''s split, as peers. Use when the user says "chat with codex", "talk to codex", "work with codex", "do this with codex", "build this with codex", "discuss this with codex", "ask codex what it thinks", or when a prompt arrives starting with "Chat from Codex:". Not for a one-shot task handed to codex, and not for a read-only second opinion.'
 allowed-tools: Bash, Read, Grep, Glob
 ---
 
 # Peer chat, Claude side
 
-> Vendored from `umputun/agterm` cookbook `two-agent-chat` (MIT, upstream 8abf983, 2026-09-19),
+> Vendored from `umputun/agterm` cookbook `two-agent-chat` (MIT, upstream 3f06693, 2026-09-26),
 > plus the local patches marked `LOCAL PATCH` in `peer-chat.py`: Codex's placeholder is
 > accepted as a prefix because a narrow pane truncates it to `Ask Codex to do any`; a
 > collapsed split is shown for the duration of a send (`surface cursor` cannot measure a
@@ -24,8 +24,8 @@ allowed-tools: Bash, Read, Grep, Glob
 > `test_peer_chat.py`; reapply the `LOCAL PATCH` hunks; move the truncated-placeholder cases
 > in `test_placeholder_is_read_through_particles` to the accepted list; run both test files.
 
-Talk with Codex in the split pane. The user reads both panes, so the conversation itself is the
-result even when code comes out of it.
+Talk with Codex in the other pane of the split. The user reads both panes, so the conversation
+itself is the result even when code comes out of it.
 
 Everything that touches the pane goes through `peer-chat.py`. Do not drive `agtermctl` directly:
 the script checks the target agent, window, composer and cursor, sends the body as bounded, separately
@@ -37,9 +37,9 @@ skill directory.
 
 ## Preconditions
 
-The session needs a split with Codex already running in it, started by the user. This skill never
-starts an agent and never opens a pane. If the split is missing or Codex is not running in it, say
-so and stop.
+The session needs a split with Codex already running in the other pane, started by the user. This
+skill never starts an agent and never opens a pane. If the split is missing or Codex is not running
+in the other pane, say so and stop.
 
 ## Sending
 

@@ -62,10 +62,14 @@ CODEX_EMPTY_PROMPT = "Ask Codex to do anything"
 # refuses the send. A prefix this long is accepted as the placeholder too; a real draft
 # that is itself a prefix of the placeholder would be mistaken for it, and that is the trade.
 CODEX_PLACEHOLDER_MIN = 8
-# Codex prefixes footer rows with two spaces. Only the final row is stripped: a
-# multi-row shortcut overlay is indistinguishable from indented modal choices and
-# therefore fails closed instead of weakening the live-prompt guard.
+# Codex prefixes footer rows with two spaces. The final row is stripped, and the one
+# above it too when a blank row sets the pair apart: without that blank it may be a
+# wrapped draft's continuation. In that pair the final row may also be indented
+# further, as when a draft hides the shortcut hint and leaves only its right-aligned
+# notice. A longer indented region is never stripped, because shortcut rows and modal
+# choices share its shape, so it fails closed instead of weakening the live-prompt guard.
 CODEX_FOOTER_RE = re.compile(r"^ {2}\S.*$")
+CODEX_NOTICE_RE = re.compile(r"^ {3,}\S.*$")
 CLAUDE_PROMPT_RE = re.compile(r"^\s*❯[\s ]*(.*?)\s*$")
 # status-line commands can add padding beyond Claude Code's two-space indent.
 CLAUDE_FOOTER_RE = re.compile(r"^ {2,}\S.*$")
@@ -110,6 +114,9 @@ PROFILES = {
     "claude": Profile("left", "claude", "claude", "Chat from Codex: ", "\n"),
     "codex": Profile("right", "codex", "codex", "Chat from Claude: ", "\n"),
 }
+PANE_FIELDS = {"left": "foreground", "right": "splitForeground"}
+# a pane whose first word is one of these runs a script, and the script names the agent.
+INTERPRETER_RE = re.compile(r"node|bun|deno|python[0-9.]*|ruby|perl|sh|bash|zsh")
 
 
 def describe_tail(pane: str, rows: int = 4, width: int = 90) -> str:
@@ -258,14 +265,23 @@ def command_name(value: str) -> str:
     return name
 
 
+def configured_command(agent: str, explicit: str | None = None) -> str:
+    env_name = f"PEER_CHAT_{agent.upper()}_COMMAND"
+    return command_name(
+        explicit or os.environ.get(env_name) or PROFILES[agent].command
+    )
+
+
 def target_profile(
     target: str, explicit_command: str | None, queue: bool = False
 ) -> Profile:
     profile = PROFILES[target]
-    env_name = f"PEER_CHAT_{profile.agent.upper()}_COMMAND"
-    configured = explicit_command or os.environ.get(env_name) or profile.command
     submit = "\t" if queue else profile.submit
-    return replace(profile, command=command_name(configured), submit=submit)
+    return replace(
+        profile,
+        command=configured_command(target, explicit_command),
+        submit=submit,
+    )
 
 
 def runs(foreground: Any, command: str) -> bool:
@@ -275,11 +291,88 @@ def runs(foreground: Any, command: str) -> bool:
     return any(pattern.search(str(part)) for part in foreground)
 
 
+def pane_runs(info: dict[str, Any], pane: str, command: str) -> bool:
+    return bool(info.get("hasSplit")) and runs(info.get(PANE_FIELDS[pane]), command)
+
+
+def peer_agent(profile: Profile) -> str:
+    return next(agent for agent in PROFILES if agent != profile.agent)
+
+
+def peer_command(profile: Profile) -> str | None:
+    try:
+        return configured_command(peer_agent(profile))
+    except ValueError:
+        return None
+
+
+def peer_runs(info: dict[str, Any], pane: str, profile: Profile) -> bool:
+    """Whether the pane runs the other agent of the pair, by that agent's own command."""
+    command = peer_command(profile)
+    return command is not None and pane_runs(info, pane, command)
+
+
+def leading_command(foreground: Any) -> str | None:
+    """Name the program a pane runs, only when its command line leaves no doubt."""
+    if not isinstance(foreground, list) or not foreground:
+        return None
+    parts = [str(part) for part in foreground]
+    name = os.path.basename(parts[0])
+    if not INTERPRETER_RE.fullmatch(name):
+        return name
+    # an interpreter option can take a value, so only a script given straight after it counts.
+    if len(parts) > 1 and not parts[1].startswith("-"):
+        return os.path.basename(parts[1])
+    return None
+
+
+def target_pane(info: dict[str, Any], profile: Profile) -> str | None:
+    home = profile.pane
+    away = "right" if home == "left" else "left"
+    home_runs = pane_runs(info, home, profile.command)
+    away_runs = pane_runs(info, away, profile.command)
+    peer_home = peer_runs(info, home, profile)
+    peer = peer_command(profile)
+    if home_runs and away_runs and peer_home and peer != profile.command:
+        # the usual pane names both agents, as a prompt or a path among its arguments can. It yields
+        # only when the program it runs is plainly the other agent; any doubt keeps it, as before.
+        home_runs = leading_command(info.get(PANE_FIELDS[home])) != peer
+    if home_runs:
+        return home
+    # agterm addresses panes by position, so the far pane is taken only when the profile's own pane
+    # demonstrably holds the other agent; anything else there could be the caller itself.
+    if away_runs and peer_home:
+        return away
+    return None
+
+
 def has_target(info: dict[str, Any], profile: Profile) -> bool:
+    return target_pane(info, profile) is not None
+
+
+def missing_target(sid: str, info: dict[str, Any], profile: Profile) -> RuntimeError:
     if not info.get("hasSplit"):
-        return False
-    field = "foreground" if profile.pane == "left" else "splitForeground"
-    return runs(info.get(field), profile.command)
+        return RuntimeError(f"session {sid} has no split")
+    away = "right" if profile.pane == "left" else "left"
+    if pane_runs(info, away, profile.command):
+        peer = peer_agent(profile)
+        return RuntimeError(
+            f"{profile.agent} runs only in the {away} pane and the {profile.pane} pane "
+            f"is not running {peer}, so it could be the sender; if {peer} runs there "
+            f"through a wrapper, set PEER_CHAT_{peer.upper()}_COMMAND to its name"
+        )
+    return RuntimeError(
+        f"{profile.agent} target pane is not running {profile.command!r}; "
+        "for a wrapper, pass --target-command NAME"
+    )
+
+
+def bind_pane(info: dict[str, Any], profile: Profile) -> Profile:
+    """Fix the pane the target runs in before any pane is read or typed into."""
+    pane = target_pane(info, profile)
+    if pane is None:
+        raise missing_target(str(info.get("id", "")), info, profile)
+    return replace(profile, pane=pane)
 
 
 def find_node(sid: str, window: str | None = None) -> dict[str, Any]:
@@ -299,14 +392,24 @@ def find_node(sid: str, window: str | None = None) -> dict[str, Any]:
 def require_target(
     sid: str, profile: Profile, window: str | None = None
 ) -> str:
+    """Check the exact pane about to be read or typed into still runs the target."""
     info = find_node(sid, window)
     if not info.get("hasSplit"):
         raise RuntimeError(f"session {sid} has no split")
-    if not has_target(info, profile):
+    if not pane_runs(info, profile.pane, profile.command):
         raise RuntimeError(
             f"{profile.agent} target pane is not running {profile.command!r}; "
             "for a wrapper, pass --target-command NAME"
         )
+    return str(info["id"])
+
+
+def require_session(
+    sid: str, profile: Profile, window: str | None = None
+) -> str:
+    info = find_node(sid, window)
+    if not has_target(info, profile):
+        raise missing_target(sid, info, profile)
     return str(info["id"])
 
 
@@ -315,7 +418,7 @@ def resolve_session(
 ) -> str:
     sid = configured_selector(explicit, "AGTERM_SESSION_ID", "session")
     if sid:
-        return require_target(sid, profile, window)
+        return require_session(sid, profile, window)
     wanted = checkout_key(os.getcwd())
     matches = [
         str(info["id"])
@@ -328,9 +431,10 @@ def resolve_session(
         return matches[0]
     if not matches:
         raise RuntimeError(
-            "this checkout maps to no session running the expected "
-            f"{profile.agent}-{profile.pane} layout; "
-            "for a wrapper, pass --target-command NAME"
+            "this checkout maps to no session running "
+            f"{profile.agent} beside the other agent; "
+            "for a wrapped target, pass --target-command NAME, and for a wrapped sender "
+            f"in a reversed split, set PEER_CHAT_{peer_agent(profile).upper()}_COMMAND"
         )
     raise RuntimeError(
         "more than one session shares this checkout; pass --session ID or launch "
@@ -373,13 +477,8 @@ def resolve_target(
         raise RuntimeError(f"no such session: {session}")
     window, info = matches[0]
     sid = str(info["id"])
-    if not info.get("hasSplit"):
-        raise RuntimeError(f"session {sid} has no split")
     if not has_target(info, profile):
-        raise RuntimeError(
-            f"{profile.agent} target pane is not running {profile.command!r}; "
-            "for a wrapper, pass --target-command NAME"
-        )
+        raise missing_target(sid, info, profile)
     return window, sid
 
 
@@ -529,8 +628,16 @@ def trailing_input_block(text: str) -> list[str]:
     lines = text.splitlines()[-BOX_LINES:]
     while lines and codex_row_is_blank(lines[-1]):
         lines.pop()
-    if lines and CODEX_FOOTER_RE.match(lines[-1]):
-        lines.pop()
+    footer_rows = 1 if lines and CODEX_FOOTER_RE.match(lines[-1]) else 0
+    if (
+        len(lines) > 2
+        and codex_row_is_blank(lines[-3])
+        and CODEX_FOOTER_RE.match(lines[-2])
+        and (CODEX_FOOTER_RE.match(lines[-1]) or CODEX_NOTICE_RE.match(lines[-1]))
+    ):
+        footer_rows = 2
+    if footer_rows:
+        del lines[-footer_rows:]
         while lines and codex_row_is_blank(lines[-1]):
             lines.pop()
     start = len(lines)
@@ -1532,6 +1639,7 @@ def run_main(progress: DeliveryProgress) -> int:
         return 0
     profile = target_profile(args.to, args.target_command, args.queue)
     window, sid = resolve_target(args.session, args.window, profile)
+    profile = bind_pane(find_node(sid, window), profile)
     message = read_message(args.stdin, args.message_file)
     sent = send_with_retry(sid, profile, message, window, progress)
     progress.phase = "confirmed"
