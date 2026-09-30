@@ -157,7 +157,10 @@ def cmd_owe(args, j):
 
 
 def cmd_clear(args, j):
-    run = current_run(j, args)
+    # an owed item names its run, and debt outlives a closed run
+    run = j.run(j.owed(args.owed_id)["run_id"])
+    if getattr(args, "run", None) and args.run != run["id"]:
+        raise Fail("owed item %s belongs to run %s" % (args.owed_id, run["id"]))
     engine.clear_owed(j, run, args.owed_id, by_human=args.by_human)
     print("cleared #%d" % args.owed_id)
     return 0

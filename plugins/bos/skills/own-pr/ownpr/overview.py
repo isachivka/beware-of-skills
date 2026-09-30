@@ -103,13 +103,14 @@ def table(journal, gh):
 
 
 def owed_report(journal):
-    out = []
-    for run in journal.open_runs():
-        owed = journal.open_owed(run["id"])
-        if not owed:
-            continue
+    out, by_run = [], {}
+    for item in journal.open_owed():
+        by_run.setdefault(item["run_id"], []).append(item)
+    for run_id, owed in by_run.items():
+        run = journal.run(run_id)
         label = "#%s" % run["pr_number"] if run["pr_number"] else short_repo(run["repo"])
-        out.append("%s (%s, run %s)" % (label, run["branch"], run["id"]))
+        closed = ", closed" if run["state"] != "open" else ""
+        out.append("%s (%s, run %s%s)" % (label, run["branch"], run["id"], closed))
         out += ["  [%d] %s" % (o["id"], o["text"]) for o in owed]
     return "\n".join(out) or "Nothing is waiting on you."
 

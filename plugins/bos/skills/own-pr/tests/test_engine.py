@@ -292,3 +292,14 @@ def test_agent_decision_and_its_debt_are_one_write(env, monkeypatch):
     with pytest.raises(RuntimeError):
         engine.record_step(j, repo, run(j, rid), "review", "done", "away", note="took 1")
     assert j.steps(rid)["review"]["status"] == "pending"
+
+
+def test_attended_offers_deferred_steps_during_a_long_wait(with_merge):
+    j, repo, rid = with_merge
+    away_to_handoff(j, repo, rid)
+    finish(j, rid, "team-handoff")
+    j.set_step(rid, "team-feedback", "running")
+    a = engine.next_action(j, repo, run(j, rid), "attended")
+    assert (a.kind, a.step, a.waits) == ("do", "eyeball", True)
+    a = engine.next_action(j, repo, run(j, rid), "away")
+    assert (a.kind, a.step) == ("reconcile", "team-feedback")

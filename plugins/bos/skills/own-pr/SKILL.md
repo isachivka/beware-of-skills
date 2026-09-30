@@ -35,7 +35,7 @@ Once the PR exists: `own-pr bind <pr-url>`.
 | --- | --- |
 | `do` | Run the step. |
 | `retry` | It failed before: fix the cause, run it again. |
-| `reconcile` | It was running when the session stopped: find out what really happened and record `done` or `failed` before anything else. |
+| `reconcile` | It is marked running (a long wait, or the session stopped mid-step): find out where it stands and record `done` or `failed` once it has ended. Start no other work of your own before that. |
 | `done` | Every step of the profile is finished. |
 
 ## The user's steps

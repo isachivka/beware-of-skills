@@ -289,3 +289,18 @@ def test_prs_help(capsys):
     out = capsys.readouterr().out
     for word in ("owed", "go", "--no-gh", "owner/repo#N"):
         assert word in out
+
+
+def test_debt_outlives_close(cfg, checkout, capsys):
+    own(capsys, "start")
+    rid = cli.open_journal().open_runs()[0]["id"]
+    own(capsys, "owe", "look at the agent's picks")
+    own(capsys, "close")
+    assert cli.main(["owed"], prog="prs") == 0
+    out = capsys.readouterr().out
+    assert "look at the agent's picks" in out and "closed" in out
+    owed = cli.open_journal().open_owed()[0]["id"]
+    assert own(capsys, "--run", rid, "clear", str(owed), "--by-human")[0] == 0
+    assert cli.open_journal().open_owed() == []
+    code, _, err = own(capsys, "--run", rid, "next")
+    assert code == 2 and "closed" in err

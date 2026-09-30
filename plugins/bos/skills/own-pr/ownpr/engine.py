@@ -43,6 +43,12 @@ def peek(journal, repo, run, mode):
     """The next action without side effects; `next_action` applies the away-mode deferrals."""
     order = profile_steps(repo, run)
     states = journal.steps(run["id"])
+    if mode == "attended":
+        # the human is back: deferred work goes to them even while a long step (a CI or review
+        # wait) is still running
+        for sid in order:
+            if states.get(sid, {}).get("status") == "deferred":
+                return Action("do", sid, mode, waits=repo.steps[sid].kind == "human")
     # a step dropped from the profile while it was running still has to be reconciled
     running = [s for s in order if states.get(s, {}).get("status") == "running"]
     running += [s for s, v in states.items() if v["status"] == "running" and s not in order]
