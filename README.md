@@ -17,6 +17,7 @@ and Codex CLI.
 | [memory-review](#memory-review)   | Turn an agent's memory pile into one annotatable document, apply your verdicts safely       |
 | [revdiff-ru](#revdiff-ru)         | Code review with everything but the code translated to Russian, line numbers intact         |
 | [decomment](#decomment)           | Strip the comments an agent left that just restate the code                                 |
+| [own-pr](#own-pr)                 | Drive your own PR to merge in the session that wrote it, with a process you edit as text     |
 
 Requirements vary by skill and are listed per skill below; the agterm ones need
 [agterm](https://github.com/umputun/agterm) on macOS, the review ones need
@@ -238,6 +239,36 @@ kept, which is where you correct its taste.
 
 **Triggers:** `/bos:decomment`, "remove the pointless comments", "the agent commented every
 line".
+
+### own-pr
+
+Every agent flow that opens a pull request ends up inventing its own "what now": draft or
+ready, when to review, who to ping. own-pr takes that tail away from all of them. The session
+that did the work hands off to it and keeps driving the PR itself, so review feedback never
+has to move to another terminal.
+
+The process lives in `~/.config/own-pr/` as Markdown: a library of steps, per-repo profiles
+("full" with rc deploy and autotests, "quick" without), and per-flow origins. Edit a file and
+the next step of every PR in flight follows the new text. `own-pr next` hands the agent one
+step at a time with its instructions; `own-pr step` records what happened.
+
+```bash
+own-pr start            # once per branch
+own-pr next             # what to do now, with the step's instructions
+own-pr away             # I'm leaving: defer my steps, keep everything else moving
+prs                     # every PR in flight: step, what waits on me, CI, rc, terminal
+prs owed                # what waits on me
+prs go 13300            # jump to the terminal driving that PR
+```
+
+Steps are `auto` or `human`. When you are away, human steps are deferred or decided by the
+agent, and either way they pile up as owed items. Nothing reaches the team while anything is
+owed: the handoff barrier is in the CLI, not in the prose, so no profile or mode can skip it.
+
+State is one SQLite file in `~/.local/state/own-pr/`. Python 3 stdlib, `gh`, `git`; `prs go`
+needs [agterm](https://github.com/umputun/agterm).
+
+**Triggers:** `/bos:own-pr`, "handle the PR", "own-pr", "what PRs are in flight".
 
 ## Contributing
 
