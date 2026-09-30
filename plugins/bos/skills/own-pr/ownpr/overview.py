@@ -56,8 +56,8 @@ def ago(ts, now=None):
 def label(action):
     if action.kind == "done":
         return "done"
-    if action.kind == "blocked":
-        return "handoff blocked"
+    if action.waits:
+        return "%s waits for Igor" % action.step
     return "%s %s" % (action.step, {"reconcile": "running", "retry": "failed"}.get(action.kind, "next"))
 
 
@@ -79,10 +79,6 @@ def table(journal, gh):
         state = (info or {}).get("state")
         if state in ("MERGED", "CLOSED"):
             running = [s for s, v in states.items() if v["status"] == "running"]
-            # team-feedback runs until the merge by design; only deploy/AQA-like work holds the run open
-            if running == ["team-feedback"]:
-                journal.set_step(run["id"], "team-feedback", "done", note="PR %s" % state.lower())
-                running = []
             if not running:
                 journal.close_run(run["id"])
                 notes.append("closed run %s: PR is %s" % (run["id"], state.lower()))

@@ -22,7 +22,7 @@ with that step's instructions. Follow them.
    `own-pr step <id> running`.
 4. **Do the step**, then record what actually happened:
    `own-pr step <id> done|failed [--evidence URL] [--note TEXT]`.
-5. **Repeat** from 2 until `NEXT: done` or `NEXT: blocked`.
+5. **Repeat** from 2 until `NEXT: done`, or until a step says to wait for Igor.
 
 Once the PR exists: `own-pr bind <pr-url>`.
 
@@ -33,13 +33,13 @@ Once the PR exists: `own-pr bind <pr-url>`.
 | `do` | Run the step. |
 | `retry` | It failed before: fix the cause, run it again. |
 | `reconcile` | It was running when the session stopped: find out what really happened (run finished? result?) and record `done` or `failed` before anything else. |
-| `blocked` | The team-handoff barrier. Stop and tell Igor what is waiting on him. Never work around it. |
 | `done` | Every step of the profile is finished. |
 
 ## Igor's steps (`kind=human`)
 
-- Attended: Igor does them. Ask, wait for him. Record `--by-igor` only for what he actually did
-  or said.
+- `Igor's step — ask him and wait`: tell him what is needed and stop until he answers. Record
+  `--by-igor` only for what he actually did or said. Steps with `away: wait` (e.g. merge) are
+  like this in every mode.
 - Away, `agent decides`: you make the decision he would make, and record `done` with `--note`
   listing every accept/decline and why. It becomes owed to him automatically.
 - Away, deferred steps are handled by `own-pr next` itself. You do not record `deferred`.
@@ -48,7 +48,6 @@ Once the PR exists: `own-pr bind <pr-url>`.
 
 Record these only when Igor said them in this session:
 - Skip a step: `own-pr step <id> skipped --by-igor --note "<his reason>"`.
-- "Waive my review": `own-pr waive --by-igor`.
 - "I'm away" / "I'm back" for this PR: `own-pr mode away|attended` (`clear` drops the override).
 - He has looked at something owed: `own-pr clear <id> --by-igor` (ids in `prs owed`). Fixing
   what an owed item describes does not clear it; only Igor looking does.
@@ -60,9 +59,8 @@ Record these only when Igor said them in this session:
 | Command | For |
 | --- | --- |
 | `own-pr explain` | The resolved step list and every setting with the file it came from |
-| `own-pr handoff-check` | What still blocks the team handoff |
 | `own-pr step <id> pending` | A finished step must run again (e.g. CI after new fixes); `next` sends you back to it |
-| `own-pr owe "<text>" [--step ID]` | Something Igor must look at before handoff |
+| `own-pr owe "<text>" [--step ID]` | Something Igor should look at when he is back (shown in `prs owed`) |
 | `own-pr env claim\|release rc09` | Hold a shared desk while deploy, manual check and autotests use it |
 | `own-pr adopt <run>` | This session takes over a run another session started |
 | `own-pr close` | PR merged or closed |

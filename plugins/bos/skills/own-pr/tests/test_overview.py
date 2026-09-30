@@ -47,25 +47,8 @@ def test_ago():
     assert overview.ago(1000, now=1000 + 3 * 86400) == "3d"
 
 
-def test_label():
-    assert overview.label(engine.Action("reconcile", "ci")) == "ci running"
-    assert overview.label(engine.Action("retry", "ci")) == "ci failed"
-    assert overview.label(engine.Action("do", "ci")) == "ci next"
-    assert overview.label(engine.Action("blocked", "team-handoff")) == "handoff blocked"
-    assert overview.label(engine.Action("done")) == "done"
 
 
-def test_now_reflects_mode_and_barrier(j):
-    rid = start(j, "feature/x", URL)
-    for s in ("pr-draft", "decomment", "review", "ci", "deploy-rc"):
-        j.set_step(rid, s, "done", by="igor")
-
-    def row():
-        return next(l for l in overview.table(j, lambda a: None).splitlines() if l.startswith("#13300"))
-    j.update_run(rid, mode_run="away")
-    assert "handoff blocked" in row()
-    j.update_run(rid, mode_run="attended")
-    assert "eyeball next" in row()
 
 
 def test_table(j):
@@ -179,10 +162,24 @@ def test_prs_unwritable_state(cfg, monkeypatch, tmp_path, capsys):
     assert capsys.readouterr().err.startswith("prs: ")
 
 
-def test_merged_run_waiting_on_team_feedback_closes(j):
+
+
+def test_label():
+    assert overview.label(engine.Action("reconcile", "ci")) == "ci running"
+    assert overview.label(engine.Action("retry", "ci")) == "ci failed"
+    assert overview.label(engine.Action("do", "ci")) == "ci next"
+    assert overview.label(engine.Action("do", "eyeball", waits=True)) == "eyeball waits for Igor"
+    assert overview.label(engine.Action("done")) == "done"
+
+
+def test_now_reflects_mode(j):
     rid = start(j, "feature/x", URL)
-    j.set_step(rid, "team-feedback", "running")
-    out = overview.table(j, fake_gh(pr_state="MERGED"))
-    assert "closed run %s: PR is merged" % rid in out
-    assert j.run(rid)["state"] == "closed"
-    assert j.steps(rid)["team-feedback"]["status"] == "done"
+    for s in ("pr-draft", "decomment", "review", "ci", "deploy-rc"):
+        j.set_step(rid, s, "done", by="igor")
+
+    def row():
+        return next(l for l in overview.table(j, lambda a: None).splitlines() if l.startswith("#13300"))
+    j.update_run(rid, mode_run="away")
+    assert "team-handoff next" in row()
+    j.update_run(rid, mode_run="attended")
+    assert "eyeball waits for Igor" in row()

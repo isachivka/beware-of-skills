@@ -45,7 +45,7 @@ through terminal tabs.
 | Part | Lives in | Role |
 | --- | --- | --- |
 | Skill `own-pr` | `plugins/bos/skills/own-pr/` | How an agent drives a PR: ask for the next step, do it, record the outcome. Shared by Claude Code and Codex. |
-| CLI `own-pr` (alias `prs`) | `plugins/bos/bin/` | Resolves the pipeline, keeps the journal, enforces the team-handoff barrier, prints the overview. Runs no agents. |
+| CLI `own-pr` (alias `prs`) | `plugins/bos/bin/` | Resolves the pipeline, keeps the journal, prints the overview. Knows no step by name. Runs no agents. |
 | Process config | `~/.config/own-pr/` | Steps, profiles, repo and origin settings. Igor edits it. Versioned by the home dotfiles repo. |
 | Journal | `~/.local/state/own-pr/own-pr.db` | SQLite. Written only through the CLI. `own-pr export` dumps JSON. |
 
@@ -72,15 +72,16 @@ each file. Everything else is prose for the agent. Unknown keys are errors.
 
 ```markdown
 kind: human            # auto | human
-away: defer            # run | defer | auto-pick
+away: defer            # auto: run | human: defer | auto-pick | wait
 
 Igor reads the diff, asks questions, criticises. ...
 ```
 
 - `kind: human` means Igor performs or decides it.
 - `away` says what the step does when the effective mode is away:
-  - `run`: runs as in attended.
+  - `run` (auto steps): runs as in attended.
   - `defer`: recorded as owed to Igor, the pipeline moves on.
+  - `wait`: not skippable; the pipeline stops here in every mode until Igor does it.
   - `auto-pick`: the agent makes the decision Igor would make, logs the choice and the
     reason, and the choice itself becomes an item owed to Igor.
 - The step id is its file name. A step does not re-run on its own after new commits; when
@@ -105,7 +106,7 @@ Validation, done on every load:
 - duplicate step id → error (repeated review rounds are attempts of one step)
 - empty or malformed profile → error
 - a profile missing any step in `repo.md`'s `requires` → error
-- a profile containing `team-handoff` without `eyeball` before it → error
+- `away` not fitting `kind` → error
 
 Only valid profiles are offered for selection.
 
@@ -167,7 +168,7 @@ AQA finishes and is reconciled before the new step list applies.
 ## Modes
 
 Two modes: `attended` (default) and `away`. The mode controls how human steps behave. It
-never changes the step list, the repo requirements or the barrier.
+never changes the step list or the repo requirements.
 
 Precedence, lowest to highest:
 1. `~/.config/own-pr/config.md`, or `own-pr away` / `own-pr attended` (machine flag)
@@ -178,23 +179,15 @@ The mode is resolved again before every step, so switching the machine flag reac
 run at its next step boundary. `own-pr away` prints which runs stay attended because of a
 terminal or run override.
 
-In away mode, `eyeball` and `manual-check` are deferred, and review-fix selection is done by
-the agent (`auto-pick`). Automatic steps run as usual.
+In away mode every step runs, including the team handoff, except human ones: `defer` steps
+are deferred as owed items, `auto-pick` steps are decided by the agent (also owed), `wait`
+steps stop the pipeline until Igor is back. Back in attended mode, `next` hands him the
+deferred steps first. Igor changed this on 2026-09-30: the earlier fixed CLI barrier before
+the team handoff is gone.
 
-## The team-handoff barrier
+## Draft until handoff
 
-Enforced by the CLI, not by step prose. No mode, profile, origin or step file can change it.
-
-`own-pr handoff-check` passes only when:
-- Igor's inspection is recorded, or Igor waived it in the session ("waive my review");
-- nothing is owed to Igor: no deferred step, no agent-made pick, no agent-chosen profile, no
-  agent-initiated profile downgrade still awaiting him;
-- every step of the profile before `team-handoff` is `done`, or `skipped` by Igor; `failed`,
-  `running` or `pending` steps block.
-
-The `team-handoff` step runs the check first and only then marks the PR ready and requests
-team review. Before that the PR stays a draft. Automated PR comments (crit-review result,
-AQA results in the body) are allowed before handoff.
+The PR stays a draft until the `team-handoff` step marks it ready.
 
 For a PR that is already ready when a run adopts it, the run records that state and does not
 toggle it back to draft.
@@ -245,10 +238,8 @@ is recorded as `failed`.
 | `own-pr start [--profile P] [--origin O]` | Create a run for the current checkout and session |
 | `own-pr bind <pr-url>` | Attach the PR to the run |
 | `own-pr next` | Print what to do next. A `running` step comes first: reconcile it (finished? result?) before anything else. Then the earliest step that is `failed` or `pending`, given the effective mode. A `failed` step is retried or fixed until it passes or Igor skips it |
-| `own-pr step <id> running\|done\|failed\|deferred\|skipped [--evidence URL] [--note TEXT]` | Record a step outcome |
+| `own-pr step <id> pending\|running\|done\|failed\|skipped [--evidence URL] [--note TEXT]` | Record a step outcome; `pending` re-queues a finished step |
 | `own-pr owe <text>` / `own-pr clear <owed-id>` | Record an owed item / record Igor discharging it |
-| `own-pr waive` | Record Igor's waiver of his inspection |
-| `own-pr handoff-check` | The barrier. Exit 0 or a list of what blocks |
 | `own-pr profile <name>` | Switch profile, print the difference |
 | `own-pr away` / `own-pr attended` | Machine mode flag |
 | `own-pr explain` | The resolved step list and every setting with the file it came from |
@@ -275,8 +266,9 @@ Igor (e.g. `inspection`, `agent's review picks`), CI, rc, last activity, session
 | `deploy-rc` | auto | run | `own-pr env claim rc09`, then `/deliver pdfFiller/rc/desk09 <branch>`. Already authorised by own-pr; the agent does not ask again |
 | `manual-check` | human | defer | Igor pokes it on rc09 |
 | `aqa` | auto | run | `/aqa <pr> rc/desk09` after `deploy-rc`, so `/aqa` never triggers its own delivery. Records the final result, not the launch |
-| `team-handoff` | auto | run | `own-pr handoff-check`, then mark ready, then `ask-review` (stamp from origin), store the message ts |
+| `team-handoff` | auto | run | Mark ready, then `ask-review` (stamp from origin), store the message permalink |
 | `team-feedback` | auto | run | Until merged or closed: fix team review comments, decomment what the fixes added, updates go to the original Slack thread |
+| `merge` | human | wait | Igor presses merge; the agent records it and closes the run |
 
 Profiles:
 - `full`: every step above.
@@ -301,7 +293,7 @@ The jsfiller primitives are not edited.
 ## Order of work
 
 1. CLI: config loading and validation, `explain`, journal, `start/bind/next/step`, the
-   barrier, `prs`.
+   `prs`.
 2. Skill `own-pr` and the jsfiller config: steps, `full`, `quick`, `repo.md`.
 3. Use it on one real PR in attended mode, then one in away mode. Fix the step prose from
    what goes wrong.

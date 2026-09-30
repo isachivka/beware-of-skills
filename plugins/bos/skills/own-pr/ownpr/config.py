@@ -5,7 +5,8 @@ from dataclasses import dataclass
 
 KEY_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_./-]*):[ \t]*(.*)$")
 COMMENT_RE = re.compile(r"\s+#.*$")
-STEP_KEYS = {"kind": ("auto", "human"), "away": ("run", "defer", "auto-pick")}
+STEP_KEYS = {"kind": ("auto", "human"), "away": ("run", "defer", "auto-pick", "wait")}
+AWAY_BY_KIND = {"auto": ("run",), "human": ("defer", "auto-pick", "wait")}
 MODES = ("attended", "away")
 
 
@@ -106,6 +107,9 @@ def load_step(path):
         if keys[key] not in allowed:
             raise ConfigError("%s: %s must be one of %s, got %r"
                               % (path, key, "|".join(allowed), keys[key]))
+    if keys["away"] not in AWAY_BY_KIND[keys["kind"]]:
+        raise ConfigError("%s: a %s step takes away: %s, got %r"
+                          % (path, keys["kind"], "|".join(AWAY_BY_KIND[keys["kind"]]), keys["away"]))
     return Step(stem(path), keys["kind"], keys["away"], body, path)
 
 
@@ -134,12 +138,6 @@ def profile_errors(profile, steps, requires):
     for req in requires:
         if req not in seen:
             errors.append("missing required step %r" % req)
-    if "team-handoff" in seen:
-        before = profile.steps[:profile.steps.index("team-handoff")]
-        if "eyeball" not in before:
-            errors.append("team-handoff without eyeball before it")
-        errors += ["required step %r after team-handoff" % r for r in requires
-                   if r in seen and r not in before]
     return errors
 
 

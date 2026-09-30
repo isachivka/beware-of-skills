@@ -98,16 +98,15 @@ def render_action(action, repo, run, stamp, added, evidence=None):
     if action.kind == "done":
         lines.append("NEXT: done — every step of profile %s is finished" % run["profile"])
         return "\n".join(lines)
-    if action.kind == "blocked":
-        lines.append("NEXT: blocked at team-handoff")
-        lines += ["  - %s" % b for b in action.blockers]
-        lines.append("Stop here and tell Igor what is waiting on him (`prs owed`).")
-        return "\n".join(lines)
     step = repo.steps.get(action.step)
     kind = step.kind if step else "removed"
     body = step.body if step else ("This step is no longer in the profile config. Find out how it "
                                    "ended and record done or failed.")
-    extra = ", agent decides — record done with --note; it becomes owed to Igor" if action.auto_pick else ""
+    extra = ""
+    if action.auto_pick:
+        extra = ", agent decides — record done with --note; it becomes owed to Igor"
+    elif action.waits:
+        extra = ", Igor's step — ask him and wait"
     lines.append("NEXT: %s %s  (kind=%s, mode=%s%s)" % (action.kind, action.step, kind,
                                                          action.mode, extra))
     if action.kind == "reconcile":
@@ -162,24 +161,6 @@ def cmd_clear(args, j):
     run = current_run(j, args)
     engine.clear_owed(j, run, args.owed_id, by_igor=args.by_igor)
     print("cleared #%d" % args.owed_id)
-    return 0
-
-
-def cmd_waive(args, j):
-    run = current_run(j, args)
-    engine.waive(j, config.load_repo(run["repo"]), run, by_igor=args.by_igor)
-    print("eyeball waived by Igor")
-    return 0
-
-
-def cmd_handoff_check(args, j):
-    run = current_run(j, args)
-    blockers = engine.handoff_blockers(j, config.load_repo(run["repo"]), run)
-    if blockers:
-        print("handoff blocked:")
-        print("\n".join("  - %s" % b for b in blockers))
-        return 1
-    print("handoff allowed")
     return 0
 
 
@@ -305,10 +286,6 @@ def own_pr_parser():
     p.add_argument("owed_id", type=int)
     p.add_argument("--by-igor", action="store_true")
     p.set_defaults(fn=cmd_clear)
-    p = sub.add_parser("waive")
-    p.add_argument("--by-igor", action="store_true")
-    p.set_defaults(fn=cmd_waive)
-    sub.add_parser("handoff-check").set_defaults(fn=cmd_handoff_check)
     p = sub.add_parser("profile")
     p.add_argument("name")
     p.add_argument("--by-igor", action="store_true")

@@ -59,7 +59,6 @@ def test_profile_validation(cfg):
     write(pdir / "dup.md", "description: d\nsteps: pr-draft, eyeball, review, review, ci\n")
     write(pdir / "unknown.md", "description: d\nsteps: pr-draft, eyeball, review, ci, nope\n")
     write(pdir / "noreq.md", "description: d\nsteps: pr-draft, eyeball, ci\n")
-    write(pdir / "noeye.md", "description: d\nsteps: pr-draft, review, ci, team-handoff\n")
     write(pdir / "empty.md", "description: d\nsteps:\n")
     write(pdir / "broken.md", "steps: pr-draft\n")
     repo = config.load_repo(REPO)
@@ -67,7 +66,6 @@ def test_profile_validation(cfg):
     assert "duplicate step 'review'" in repo.invalid["dup"]
     assert "unknown step 'nope'" in repo.invalid["unknown"]
     assert "missing required step 'review'" in repo.invalid["noreq"]
-    assert "team-handoff without eyeball before it" in repo.invalid["noeye"]
     assert "no steps" in repo.invalid["empty"]
     assert any("missing key 'description'" in e for e in repo.invalid["broken"])
 
@@ -126,7 +124,19 @@ def test_machine_mode_precedence(cfg, tmp_path):
     assert config.machine_mode() == ("attended", str(flag))
 
 
-def test_required_step_after_handoff(cfg):
-    write(repo_dir(cfg) / "profiles" / "late.md",
-          "description: d\nsteps: pr-draft, eyeball, team-handoff, review, ci\n")
-    assert "required step 'review' after team-handoff" in config.load_repo(REPO).invalid["late"]
+
+
+def test_away_wait_is_a_valid_value(cfg):
+    write(cfg / "steps" / "merge.md", "kind: human\naway: wait\n\nIgor merges.\n")
+    assert config.load_repo(REPO).steps["merge"].away == "wait"
+
+
+def test_handoff_without_eyeball_is_valid(cfg):
+    write(repo_dir(cfg) / "profiles" / "bare.md", "description: d\nsteps: pr-draft, review, ci, team-handoff\n")
+    assert "bare" in config.load_repo(REPO).profiles
+
+
+def test_away_value_must_fit_kind(cfg):
+    write(cfg / "steps" / "eyeball.md", "kind: human\naway: run\n")
+    with pytest.raises(config.ConfigError, match="a human step takes away: defer|auto-pick|wait"):
+        config.load_repo(REPO)

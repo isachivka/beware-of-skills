@@ -68,18 +68,6 @@ def test_attended_returns_to_deferred_step(env):
     assert (a.kind, a.step) == ("do", "eyeball")
 
 
-def test_handoff_blocked_until_clean(env):
-    j, repo, rid = env
-    finish(j, rid, "pr-draft", "decomment", "eyeball", "review", "ci")
-    assert engine.handoff_blockers(j, repo, run(j, rid)) == ["deploy-rc is pending"]
-    finish(j, rid, "deploy-rc")
-    owed = j.add_owed(rid, "review decided by the agent: x", step="review")
-    a = engine.next_action(j, repo, run(j, rid), "attended")
-    assert (a.kind, a.step) == ("blocked", "team-handoff")
-    assert a.blockers == ["owed to Igor: review decided by the agent: x"]
-    engine.clear_owed(j, run(j, rid), owed, by_igor=True)
-    a = engine.next_action(j, repo, run(j, rid), "attended")
-    assert (a.kind, a.step) == ("do", "team-handoff")
 
 
 def test_skip_rules(env):
@@ -144,13 +132,6 @@ def test_step_outside_profile(env):
         engine.record_step(j, repo, run(j, rid), "aqa", "done", "attended")
 
 
-def test_waive(env):
-    j, repo, rid = env
-    j.add_owed(rid, "eyeball deferred", step="eyeball")
-    engine.waive(j, repo, run(j, rid), by_igor=True)
-    eyeball = j.steps(rid)["eyeball"]
-    assert (eyeball["status"], eyeball["by"], eyeball["note"]) == ("skipped", "igor", "waived by Igor")
-    assert j.open_owed(rid) == []
 
 
 def test_switch_profile(env):
@@ -182,14 +163,6 @@ def test_new_step_in_profile_is_picked_up(env, cfg):
     assert engine.next_action(j, repo, run(j, rid), "attended").step == "strip-tests"
 
 
-def test_removed_step_keeps_its_debt(env, cfg):
-    j, repo, rid = env
-    j.add_owed(rid, "deploy-rc deferred", step="deploy-rc")
-    write(repo_dir(cfg) / "profiles" / "full.md",
-          "description: d\nsteps: pr-draft, eyeball, review, ci, team-handoff, team-feedback\n")
-    repo = config.load_repo(REPO)
-    finish(j, rid, "pr-draft", "eyeball", "review", "ci")
-    assert "owed to Igor: deploy-rc deferred" in engine.handoff_blockers(j, repo, run(j, rid))
 
 
 def test_broken_profile_is_a_rule_error(env, cfg):
@@ -211,38 +184,12 @@ def test_close_waits_for_running(env):
     assert j.run(rid)["state"] == "closed"
 
 
-def test_handoff_needs_igor_on_eyeball_even_if_shadowed(env, cfg):
-    j, repo, rid = env
-    write(repo_dir(cfg) / "steps" / "eyeball.md", "kind: auto\naway: run\n\nLook.\n")
-    repo = config.load_repo(REPO)
-    finish(j, rid, "pr-draft", "decomment", "review", "ci", "deploy-rc")
-    engine.record_step(j, repo, run(j, rid), "eyeball", "done", "attended")
-    assert engine.handoff_blockers(j, repo, run(j, rid)) == [
-        "Igor has not inspected the PR (eyeball) or waived it"]
 
 
-def test_team_handoff_cannot_be_recorded_while_blocked(env):
-    j, repo, rid = env
-    with pytest.raises(engine.RuleError, match="team handoff is blocked"):
-        engine.record_step(j, repo, run(j, rid), "team-handoff", "running", "attended")
 
 
-def test_failed_handoff_is_blocked_not_retried(env):
-    j, repo, rid = env
-    finish(j, rid, "pr-draft", "decomment", "eyeball", "review", "ci", "deploy-rc")
-    j.set_step(rid, "team-handoff", "failed")
-    j.add_owed(rid, "x")
-    assert engine.next_action(j, repo, run(j, rid), "attended").kind == "blocked"
 
 
-def test_handoff_check_before_new_step_row_exists(env, cfg):
-    j, repo, rid = env
-    write(cfg / "steps" / "strip-tests.md", "kind: auto\naway: run\n\nStrip.\n")
-    write(repo_dir(cfg) / "profiles" / "full.md",
-          "description: d\nsteps: pr-draft, strip-tests, decomment, eyeball, review, ci,"
-          " deploy-rc, team-handoff, team-feedback\n")
-    repo = config.load_repo(REPO)
-    assert "strip-tests is pending" in engine.handoff_blockers(j, repo, run(j, rid))
 
 
 def test_running_step_removed_from_profile_is_still_reconciled(env, cfg):
@@ -280,3 +227,57 @@ def test_peek_is_read_only(env):
     assert (a.kind, a.step, a.auto_pick) == ("do", "review", True)
     assert j.steps(rid)["eyeball"]["status"] == "pending"
     assert j.open_owed(rid) == []
+
+
+@pytest.fixture
+def with_merge(cfg, tmp_path):
+    write(cfg / "steps" / "merge.md", "kind: human\naway: wait\n\nIgor merges.\n")
+    write(repo_dir(cfg) / "profiles" / "full.md",
+          "description: d\nsteps: pr-draft, decomment, eyeball, review, ci, deploy-rc, team-handoff,"
+          " team-feedback, merge\n")
+    j = Journal(str(tmp_path / "state" / "own-pr.db"))
+    repo = config.load_repo(REPO)
+    rid = j.create_run(REPO, "feature/x", "/co", "full", "explicit", repo.profiles["full"].steps)
+    return j, repo, rid
+
+
+def away_to_handoff(j, repo, rid):
+    finish(j, rid, "pr-draft", "decomment")
+    assert engine.next_action(j, repo, run(j, rid), "away").step == "review"
+    engine.record_step(j, repo, run(j, rid), "review", "done", "away", note="took 1")
+    finish(j, rid, "ci", "deploy-rc")
+
+
+def test_away_runs_through_team_handoff_with_debt(with_merge):
+    j, repo, rid = with_merge
+    away_to_handoff(j, repo, rid)
+    a = engine.next_action(j, repo, run(j, rid), "away")
+    assert (a.kind, a.step, a.waits) == ("do", "team-handoff", False)
+    engine.record_step(j, repo, run(j, rid), "team-handoff", "done", "away")
+    assert [o["step"] for o in j.open_owed(rid)] == ["eyeball", "review"]
+
+
+def test_wait_step_stops_away_mode(with_merge):
+    j, repo, rid = with_merge
+    away_to_handoff(j, repo, rid)
+    finish(j, rid, "team-handoff", "team-feedback")
+    a = engine.next_action(j, repo, run(j, rid), "away")
+    assert (a.kind, a.step, a.waits) == ("do", "merge", True)
+    with pytest.raises(engine.RuleError, match="Igor's step"):
+        engine.record_step(j, repo, run(j, rid), "merge", "done", "away", note="merged it")
+    assert j.steps(rid)["merge"]["status"] == "pending"
+
+
+def test_attended_hands_back_deferred_steps_after_handoff(with_merge):
+    j, repo, rid = with_merge
+    away_to_handoff(j, repo, rid)
+    finish(j, rid, "team-handoff")
+    a = engine.next_action(j, repo, run(j, rid), "attended")
+    assert (a.kind, a.step, a.waits) == ("do", "eyeball", True)
+
+
+def test_failed_step_before_handoff_is_retried_first(env):
+    j, repo, rid = env
+    finish(j, rid, "pr-draft", "decomment", "eyeball", "review", "deploy-rc")
+    j.set_step(rid, "ci", "failed")
+    assert (engine.next_action(j, repo, run(j, rid), "away").kind) == "retry"

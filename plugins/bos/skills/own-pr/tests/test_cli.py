@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from conftest import REPO, git, repo_dir, write
 from ownpr import cli
 
@@ -65,31 +67,8 @@ def test_next_prints_step_prose_and_context(cfg, checkout, capsys):
     assert out.rstrip().endswith("Do pr-draft.")
 
 
-def test_step_flow_and_barrier(cfg, checkout, capsys):
-    own(capsys, "start")
-    for sid in ("pr-draft", "decomment", "ci", "deploy-rc"):
-        assert own(capsys, "step", sid, "done")[0] == 0
-    code, _, err = own(capsys, "step", "eyeball", "done")
-    assert code == 2 and "Igor's step" in err
-    own(capsys, "step", "eyeball", "done", "--by-igor")
-    code, out, _ = own(capsys, "handoff-check")
-    assert code == 1 and "review is pending" in out
-    own(capsys, "step", "review", "done", "--by-igor")
-    code, out, _ = own(capsys, "handoff-check")
-    assert code == 0 and "handoff allowed" in out
 
 
-def test_away_flow(cfg, checkout, capsys, monkeypatch):
-    monkeypatch.setenv("OWN_PR_MODE", "away")
-    own(capsys, "start")
-    own(capsys, "step", "pr-draft", "done")
-    own(capsys, "step", "decomment", "done")
-    code, out, _ = own(capsys, "next")
-    assert "NEXT: do review  (kind=human, mode=away, agent decides" in out
-    own(capsys, "step", "review", "done", "--note", "took 2, declined 1")
-    code, out, _ = own(capsys, "handoff-check")
-    assert "owed to Igor: eyeball deferred while you were away" in out
-    assert "owed to Igor: review decided by the agent: took 2, declined 1" in out
 
 
 def test_next_shows_existing_evidence(cfg, checkout, capsys):
@@ -122,11 +101,6 @@ def test_owe_and_clear(cfg, checkout, capsys):
     assert cli.open_journal().open_owed() == []
 
 
-def test_waive(cfg, checkout, capsys):
-    own(capsys, "start")
-    assert own(capsys, "waive", "--by-igor")[0] == 0
-    run = cli.open_journal().open_runs()[0]
-    assert cli.open_journal().steps(run["id"])["eyeball"]["status"] == "skipped"
 
 
 def test_machine_away_reports_pinned_runs(cfg, checkout, capsys, monkeypatch, tmp_path):
@@ -209,13 +183,11 @@ def test_no_config_for_repo(cfg, checkout, capsys):
     assert code == 2 and err.startswith("own-pr: no own-pr config for github.com/someone/else")
 
 
-def test_clear_and_waive_need_by_igor(cfg, checkout, capsys):
+def test_clear_needs_by_igor(cfg, checkout, capsys):
     own(capsys, "start")
     own(capsys, "owe", "look at it")
     owed = cli.open_journal().open_owed()[0]["id"]
     code, _, err = own(capsys, "clear", str(owed))
-    assert code == 2 and "only Igor" in err
-    code, _, err = own(capsys, "waive")
     assert code == 2 and "only Igor" in err
     assert cli.open_journal().open_owed()[0]["id"] == owed
 
@@ -233,3 +205,32 @@ def test_closed_run_is_read_only(cfg, checkout, capsys):
     for argv in (("--run", rid, "next"), ("--run", rid, "env", "claim", "rc09"), ("adopt", rid)):
         code, _, err = own(capsys, *argv)
         assert code == 2 and "closed" in err
+
+
+def test_away_flow_reaches_handoff(cfg, checkout, capsys, monkeypatch):
+    monkeypatch.setenv("OWN_PR_MODE", "away")
+    own(capsys, "start")
+    own(capsys, "step", "pr-draft", "done")
+    own(capsys, "step", "decomment", "done")
+    code, out, _ = own(capsys, "next")
+    assert "NEXT: do review  (kind=human, mode=away, agent decides" in out
+    own(capsys, "step", "review", "done", "--note", "took 2, declined 1")
+    own(capsys, "step", "ci", "done")
+    own(capsys, "step", "deploy-rc", "done")
+    code, out, _ = own(capsys, "next")
+    assert out.splitlines()[0] == "NEXT: do team-handoff  (kind=auto, mode=away)"
+    assert own(capsys, "step", "team-handoff", "done")[0] == 0
+
+
+def test_human_step_says_wait_for_igor(cfg, checkout, capsys):
+    own(capsys, "start")
+    own(capsys, "step", "pr-draft", "done")
+    own(capsys, "step", "decomment", "done")
+    code, out, _ = own(capsys, "next")
+    assert out.splitlines()[0] == "NEXT: do eyeball  (kind=human, mode=attended, Igor's step — ask him and wait)"
+
+
+def test_handoff_check_is_gone(cfg, checkout, capsys):
+    own(capsys, "start")
+    with pytest.raises(SystemExit):
+        cli.main(["handoff-check"])

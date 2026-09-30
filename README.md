@@ -261,9 +261,10 @@ prs owed                # what waits on me
 prs go 13300            # jump to the terminal driving that PR
 ```
 
-Steps are `auto` or `human`. When you are away, human steps are deferred or decided by the
-agent, and either way they pile up as owed items. Nothing reaches the team while anything is
-owed: the handoff barrier is in the CLI, not in the prose, so no profile or mode can skip it.
+Steps are `auto` or `human`. When you are away, every step runs except yours: those are
+deferred or decided by the agent, and pile up as owed items in `prs owed`. A step marked
+`away: wait` (merging, say) is never skipped: the pipeline stops there until you do it. The
+CLI knows no step by name; what a step means lives only in its file.
 
 State is one SQLite file in `~/.local/state/own-pr/`. Python 3 stdlib, `gh`, `git`; `prs go`
 needs [agterm](https://github.com/umputun/agterm).

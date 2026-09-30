@@ -1,5 +1,5 @@
-"""own-pr rules: effective mode, the next step, recording outcomes, the team-handoff barrier."""
-from dataclasses import dataclass, field
+"""own-pr rules: effective mode, the next step, recording outcomes. Knows no step by name."""
+from dataclasses import dataclass
 
 
 class RuleError(Exception):
@@ -12,7 +12,7 @@ class Action:
     step: str = None
     mode: str = None
     auto_pick: bool = False
-    blockers: list = field(default_factory=list)
+    waits: bool = False
 
 
 def effective_mode(run, machine):
@@ -35,29 +35,6 @@ def running_steps(journal, run):
     return [s for s, v in journal.steps(run["id"]).items() if v["status"] == "running"]
 
 
-def handoff_blockers(journal, repo, run):
-    order = profile_steps(repo, run)
-    if "team-handoff" not in order:
-        return ["profile %s has no team-handoff step" % run["profile"]]
-    states = journal.steps(run["id"])
-    blockers = []
-    eyeball = states.get("eyeball", {})
-    # the one fact no step file can redefine: Igor himself looked, or waived it
-    if eyeball.get("by") != "igor" or eyeball.get("status") not in ("done", "skipped"):
-        blockers.append("Igor has not inspected the PR (eyeball) or waived it")
-    for sid in order[:order.index("team-handoff")]:
-        if sid == "eyeball":
-            continue
-        state = states.get(sid, {"status": "pending", "by": None})
-        status, by = state["status"], state["by"]
-        if status == "skipped" and by != "igor":
-            blockers.append("%s was skipped without Igor" % sid)
-        elif status not in ("done", "skipped"):
-            blockers.append("%s is %s" % (sid, status))
-    blockers += ["owed to Igor: %s" % o["text"] for o in journal.open_owed(run["id"])]
-    return blockers
-
-
 def mode_label(mode, source):
     return "%s (%s)" % (mode, source) if source else mode
 
@@ -75,21 +52,16 @@ def peek(journal, repo, run, mode):
         status, step = states.get(sid, {}).get("status", "pending"), repo.steps[sid]
         if status in ("done", "skipped"):
             continue
-        if sid == "team-handoff":
-            blockers = handoff_blockers(journal, repo, run)
-            if blockers:
-                return Action("blocked", sid, mode, blockers=blockers)
         if status == "failed":
             return Action("retry", sid, mode)
-        if status == "deferred":
-            if mode == "attended":
-                return Action("do", sid, mode)
+        if status == "deferred" and mode == "away":
             continue
-        if mode == "away" and step.kind == "human":
-            if step.away == "defer":
+        if step.kind == "human":
+            if mode == "away" and step.away == "defer":
                 continue
-            if step.away == "auto-pick":
+            if mode == "away" and step.away == "auto-pick":
                 return Action("do", sid, mode, auto_pick=True)
+            return Action("do", sid, mode, waits=True)
         return Action("do", sid, mode)
     return Action("done", None, mode)
 
@@ -108,8 +80,6 @@ def next_action(journal, repo, run, mode, mode_source=None):
             journal.set_step(run["id"], sid, "deferred", note="deferred while away", by="agent",
                              mode=mode_label(mode, mode_source))
             journal.add_owed(run["id"], "%s deferred while you were away" % sid, step=sid)
-    if action.kind == "blocked":
-        action.blockers = handoff_blockers(journal, repo, run)
     return action
 
 
@@ -123,10 +93,6 @@ def record_step(journal, repo, run, step_id, status, mode, evidence=None, note=N
     label = mode_label(mode, mode_source)
     if status == "deferred":
         raise RuleError("deferral is decided by `own-pr next`, not recorded by hand")
-    if step_id == "team-handoff" and status in ("running", "done"):
-        blockers = handoff_blockers(journal, repo, run)
-        if blockers:
-            raise RuleError("team handoff is blocked: %s" % "; ".join(blockers))
     if status == "skipped":
         if not by_igor:
             raise RuleError("only Igor skips a step; record it with --by-igor once he has said so")
@@ -161,14 +127,6 @@ def clear_owed(journal, run, owed_id, by_igor=False):
     step = item["step"]
     if step and journal.steps(run["id"]).get(step, {}).get("status") == "deferred":
         journal.set_step(run["id"], step, "done", note="cleared by Igor", by="igor")
-
-
-def waive(journal, repo, run, by_igor=False):
-    if not by_igor:
-        raise RuleError("only Igor waives his review; record it with --by-igor once he has said so")
-    record_step(journal, repo, run, "eyeball", "skipped", "attended", note="waived by Igor",
-                by_igor=True)
-    journal.clear_owed_for_step(run["id"], "eyeball")
 
 
 def switch_profile(journal, repo, run, name, by_igor):
