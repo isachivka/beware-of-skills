@@ -103,8 +103,6 @@ def record_step(journal, repo, run, step_id, status, mode, evidence=None, note=N
     if status == "skipped":
         if not by_human:
             raise RuleError("only the human skips a step; record it with --by-human once they have said so")
-        if step_id in repo.requires:
-            raise RuleError("%s is required by %s and cannot be skipped" % (step_id, repo.id))
         if not note:
             raise RuleError("a skip needs --note with the human's reason")
         journal.set_step(run["id"], step_id, "skipped", evidence, note, by, mode=label)

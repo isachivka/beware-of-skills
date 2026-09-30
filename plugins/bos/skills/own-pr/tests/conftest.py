@@ -37,12 +37,11 @@ def cfg(tmp_path, monkeypatch):
     root = tmp_path / "config"
     for sid, (kind, away) in STEPS.items():
         write(root / "steps" / (sid + ".md"),
-              "kind: %s\naway: %s\n\nDo %s.\n" % (kind, away, sid))
-    write(repo_dir(root) / "repo.md", "requires: review, ci\ndefault: full\n")
+              "---\nkind: %s\naway: %s\n---\nDo %s.\n" % (kind, away, sid))
     write(repo_dir(root) / "profiles" / "full.md",
-          "description: runtime change\nsteps: %s\n" % FULL)
+          "---\ndescription: runtime change\nsteps: %s\n---\n" % FULL)
     write(repo_dir(root) / "profiles" / "quick.md",
-          "description: small fix\nsteps: %s\n" % QUICK)
+          "---\ndescription: small fix\nsteps: %s\n---\n" % QUICK)
     monkeypatch.setenv("OWN_PR_CONFIG_DIR", str(root))
     monkeypatch.setenv("OWN_PR_STATE_DIR", str(tmp_path / "state"))
     for key in ("OWN_PR_MODE", "OWN_PR_ORIGIN", "CLAUDE_CODE_SESSION_ID",

@@ -52,7 +52,7 @@ def test_checkout_outside_git(tmp_path):
 
 def test_identity():
     ident = context.identity({"CLAUDE_CODE_SESSION_ID": "c1", "AGTERM_SESSION_ID": "A1"})
-    assert ident == {"claude": "c1", "codex": None, "agterm": "A1"}
+    assert ident == {"claude": "c1", "codex": None, "agterm": "A1", "pane": None}
 
 
 def origins():

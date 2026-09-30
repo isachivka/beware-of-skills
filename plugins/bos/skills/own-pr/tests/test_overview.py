@@ -101,7 +101,7 @@ def test_table_without_gh(j):
 def test_table_with_broken_profile(j, cfg):
     from conftest import repo_dir, write
     start(j, "feature/x", URL)
-    write(repo_dir(cfg) / "profiles" / "full.md", "description: d\nsteps: nope\n")
+    write(repo_dir(cfg) / "profiles" / "full.md", "---\ndescription: d\nsteps: nope\n---\n")
     out = overview.table(j, lambda args: None)
     assert "config error" in out
 
@@ -185,3 +185,41 @@ def test_now_reflects_mode(j):
     assert "team-handoff next" in row()
     j.update_run(rid, mode_run="attended")
     assert "eyeball waits for the human" in row()
+
+
+def fake_polls(*states):
+    seq = list(states)
+
+    def gh(args):
+        return seq.pop(0) if seq else states[-1]
+    return gh
+
+
+def pr(state="OPEN", decision="", reviews=0, comments=0):
+    return {"state": state, "reviewDecision": decision,
+            "reviews": [{}] * reviews, "comments": [{}] * comments}
+
+
+def test_watch_returns_what_changed(j):
+    rid = start(j, "feature/x", URL)
+    slept = []
+    out = overview.watch(j.run(rid), fake_polls(pr(), None, pr(), pr(reviews=1, decision="APPROVED")),
+                         slept.append, 60)
+    assert out == "decision - -> APPROVED, reviews 0 -> 1"
+    assert slept == [60, 60, 60]
+
+
+def test_watch_sees_merge(j):
+    rid = start(j, "feature/x", URL)
+    assert overview.watch(j.run(rid), fake_polls(pr(), pr(state="MERGED")), lambda s: None, 1) \
+        == "state OPEN -> MERGED"
+
+
+def test_notify_types_into_the_recorded_pane(j):
+    rid = start(j, "feature/x", URL)
+    j.update_run(rid, agterm_pane="right")
+    typed = []
+    overview.notify(j.run(rid), "reviews 0 -> 1", lambda *a: typed.append(a) or True)
+    sid, pane, text = typed[0]
+    assert (sid, pane) == ("2F400916-AAAA", "right")
+    assert text.startswith("own-pr: %s changed (reviews 0 -> 1)" % URL) and text.endswith("\n")

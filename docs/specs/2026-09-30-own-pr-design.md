@@ -63,15 +63,16 @@ lives in the step files.
   config.md                               machine defaults: mode
   steps/<id>.md                           global step library
   repos/<host>/<owner>/<repo>/
-    repo.md                               requires, default profile
     steps/<id>.md                         repo steps; same id shadows the global one
     profiles/<name>.md                    description + ordered step ids
   origins/<flow>.md                       root, default profile per target repo, notes
 ```
 
-All files are Markdown. The CLI parses only a fixed set of `key: value` lines at the top of
-each file; values are literal (no inline comments). `kind` is `auto|human`; `away` is `run` for
-auto steps and `defer|auto-pick|wait` for human ones; `default` is `auto` or a profile name. Everything else is prose for the agent. Unknown keys are errors.
+All files are Markdown with YAML-style frontmatter between `---` lines, as in skills: only
+`key: value` lines, values literal (no inline comments). Everything after the frontmatter is
+prose for the agent. `kind` is `auto|human`; `away` is `run` for auto steps and
+`defer|auto-pick|wait` for human ones. Unknown keys are errors. A repo is just a directory of
+steps and profiles; there is no per-repo settings file.
 
 ### Step file
 
@@ -110,7 +111,6 @@ Validation, done on every load:
 - unknown step id → error
 - duplicate step id → error (repeated review rounds are attempts of one step)
 - empty or malformed profile → error
-- a profile missing any step in `repo.md`'s `requires` → error
 - `away` not fitting `kind` → error
 
 Only valid profiles are offered for selection.
@@ -119,18 +119,8 @@ Only valid profiles are offered for selection.
 
 Dropping steps is what profiles are for. Skipping one step of the chosen profile in one run is
 Igor's decision only: he says so in the session, the agent records `skipped` with his reason.
-An agent never skips on its own, a step listed in `requires` cannot be skipped, and skipping a
+An agent never skips on its own, and skipping a
 human step does not discharge anything already owed for it.
-
-### repo.md
-
-```markdown
-requires: review, ci
-default: auto
-```
-
-The repo owns its requirements: which steps are mandatory. How it deploys and where review
-requests go is written in its own step files.
 
 ### origins/<flow>.md
 
@@ -159,9 +149,9 @@ Resolved once when the run starts, then stored:
 
 1. Igor names it in the session, or `--profile`.
 2. The origin's profile for this target repo.
-3. `repo.md` `default`: a profile name, or `auto`. With `auto` the agent chooses by the
-   profile descriptions, records the choice and the reason, and the choice becomes an item
-   owed to Igor.
+3. Otherwise the CLI lists the profiles. The agent passes the one the human or the flow
+   named, or picks by the descriptions with `--auto-reason`, and that pick becomes owed to
+   the human.
 
 A profile that was named explicitly and does not exist is an error, not a fallback.
 
@@ -277,11 +267,14 @@ Igor (e.g. `inspection`, `agent's review picks`), CI, last activity, session.
 | `team-feedback` | auto | run | Until merged or closed: fix team review comments, decomment what the fixes added, updates go to the original Slack thread |
 | `merge` | human | wait | Igor presses merge; the agent records it and closes the run |
 
-Profiles:
-- `full`: every step above.
-- `quick`: without `deploy-rc`, `manual-check`, `aqa`.
+Only `typing-wave` exists today (Igor, 2026-09-30); other profiles come when he writes them.
 
-`repo.md`: `requires: review, ci`, `default: auto`.
+## Waiting on the team
+
+`own-pr watch` polls the PR and exits when its state, review decision, reviews or comments
+change. Claude Code runs it under the Monitor tool, whose exit wakes the session. Codex has no
+background wake-up, so it runs `own-pr watch --notify` detached; on a change that types a trigger
+line into the run's recorded agterm session and pane.
 
 ## Migration
 
@@ -301,7 +294,7 @@ The jsfiller primitives are not edited.
 
 1. CLI: config loading and validation, `explain`, journal, `start/bind/next/step`, the
    `prs`.
-2. Skill `own-pr` and the jsfiller config: steps, `full`, `quick`, `repo.md`.
+2. Skill `own-pr` and the jsfiller config: steps and the `typing-wave` profile.
 3. Use it on one real PR in attended mode, then one in away mode. Fix the step prose from
    what goes wrong.
 4. Origins and the caller migration, one flow at a time.

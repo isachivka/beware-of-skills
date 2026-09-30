@@ -40,7 +40,8 @@ def checkout(cwd):
 def identity(env):
     return {"claude": env.get("CLAUDE_CODE_SESSION_ID") or None,
             "codex": env.get("CODEX_THREAD_ID") or None,
-            "agterm": env.get("AGTERM_SESSION_ID") or None}
+            "agterm": env.get("AGTERM_SESSION_ID") or None,
+            "pane": env.get("AGTERM_PANE") or None}
 
 
 def resolve_origin(origins, explicit, env_value, main_root):

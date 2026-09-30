@@ -148,3 +148,20 @@ def test_nested_tx_rolls_back_together(j):
             j.set_step(rid, "ci", "done")
             raise RuntimeError("boom")
     assert j.steps(rid)["ci"]["status"] == "pending"
+
+
+def test_old_journal_gains_new_columns(tmp_path):
+    import sqlite3
+    path = str(tmp_path / "old.db")
+    db = sqlite3.connect(path)
+    db.execute("CREATE TABLE runs (id TEXT PRIMARY KEY, repo TEXT NOT NULL, branch TEXT NOT NULL,"
+               " checkout TEXT NOT NULL, pr_url TEXT, pr_number INTEGER, origin TEXT, profile TEXT NOT NULL,"
+               " profile_by TEXT NOT NULL, mode_env TEXT, mode_run TEXT, claude_session TEXT,"
+               " codex_session TEXT, agterm_session TEXT, state TEXT NOT NULL DEFAULT 'open',"
+               " created REAL NOT NULL, updated REAL NOT NULL)")
+    db.commit()
+    db.close()
+    j = Journal(path)
+    rid = j.create_run("github.com/o/r", "b", "/co", "full", "explicit", STEPS,
+                       identity={"agterm": "A", "pane": "left"})
+    assert j.run(rid)["agterm_pane"] == "left"

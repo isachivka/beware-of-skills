@@ -5,6 +5,7 @@ import os
 import re
 import sqlite3
 import sys
+import time
 
 from . import config, context, engine
 from .journal import Journal, JournalError
@@ -52,10 +53,8 @@ def choose_profile(repo, origin, args):
         if name not in repo.profiles:
             raise Fail("origin %s names profile %r, which is not valid in %s" % (origin.name, name, repo.id))
         return name, "origin"
-    if repo.default != "auto":
-        return repo.default, "repo default"
-    lines = ["%s has `default: auto`: choose a profile and rerun with"
-             " --profile NAME --auto-reason WHY (or the one the human named, without --auto-reason):" % repo.id]
+    lines = ["%s: choose a profile and rerun with --profile NAME (add --auto-reason WHY if you"
+             " picked it yourself rather than the human or the calling flow):" % repo.id]
     lines += ["  %s: %s" % (p.name, p.description) for p in repo.profiles.values()]
     raise Fail("\n".join(lines))
 
@@ -204,8 +203,6 @@ def cmd_explain(args, j):
         repo_id = context.checkout(os.getcwd())["repo"]
     repo = config.load_repo(repo_id)
     out = ["repo: %s  (%s)" % (repo.id, repo.source),
-           "requires: %s" % (", ".join(repo.requires) or "-"),
-           "default profile: %s" % repo.default,
            "profiles: %s" % ", ".join(repo.profiles)]
     out += ["invalid profile %s: %s" % (n, "; ".join(e)) for n, e in repo.invalid.items()]
     if run:
@@ -248,8 +245,22 @@ def cmd_adopt(args, j):
         raise Fail("run %s is closed" % args.target)
     ident = context.identity(os.environ)
     j.update_run(args.target, claude_session=ident["claude"], codex_session=ident["codex"],
-                 agterm_session=ident["agterm"])
+                 agterm_session=ident["agterm"], agterm_pane=ident["pane"])
     print("run %s now owned by this session" % args.target)
+    return 0
+
+
+def cmd_watch(args, j):
+    from . import overview
+    run = current_run(j, args)
+    if not run["pr_url"]:
+        raise Fail("run %s has no PR yet; `own-pr bind <url>` first" % run["id"])
+    if args.notify and not run["agterm_session"]:
+        raise Fail("run %s has no agterm session recorded; --notify has nowhere to type" % run["id"])
+    change = overview.watch(run, overview.real_gh, time.sleep, args.interval)
+    print("%s: %s" % (run["pr_url"], change))
+    if args.notify and not overview.notify(run, change, overview.real_type):
+        raise Fail("could not type into agterm session %s" % run["agterm_session"][:8])
     return 0
 
 
@@ -300,7 +311,6 @@ statuses:
             decision in away mode (needs --note; becomes owed to the human).
   failed    tried and did not work; `next` sends you back to retry it.
   skipped   the human decided not to do it: needs --by-human and --note with their reason.
-            Steps the repo requires cannot be skipped.
 """
 
 
@@ -321,8 +331,8 @@ def own_pr_parser():
 
     p = cmd("start", cmd_start, "create a run for this checkout and pick its profile",
             "Create a run for the current checkout's repo and branch. The profile comes from\n"
-            "--profile, else the origin's profile for this repo, else repo.md `default`. With\n"
-            "`default: auto` the list of profiles is printed: choose one and pass it again.")
+            "--profile, else the origin's profile for this repo; otherwise the profiles are\n"
+            "listed: choose one and pass it again.")
     p.add_argument("--profile", metavar="NAME", help="profile to use (named by the human or the calling flow)")
     p.add_argument("--auto-reason", metavar="WHY",
                    help="the agent picked --profile itself: why (becomes owed to the human)")
@@ -371,6 +381,17 @@ def own_pr_parser():
     p.add_argument("env", metavar="NAME", help="resource name, as the step prose uses it")
     p = cmd("adopt", cmd_adopt, "make this session the owner of a run another session started")
     p.add_argument("target", metavar="RUN", help="run id, as shown by `prs`")
+    p = cmd("watch", cmd_watch, "wait until the PR changes: a review, a comment, approval, merge",
+            "Poll the PR every --interval seconds and exit when its state, review decision,\n"
+            "reviews or comments change, printing what changed. The first poll is the baseline.\n\n"
+            "Claude Code: run it under the Monitor tool; its exit wakes the session.\n"
+            "Codex (no background wake-up): run it detached with --notify, e.g.\n"
+            "  nohup own-pr watch --notify >/dev/null 2>&1 &\n"
+            "and it types `own-pr: <pr> changed (...). Run own-pr next.` into this run's\n"
+            "agterm session and pane.")
+    p.add_argument("--interval", type=int, default=120, metavar="SECONDS", help="poll interval (default 120)")
+    p.add_argument("--notify", action="store_true",
+                   help="on change, type a trigger line into the run's agterm session")
     cmd("close", cmd_close, "end the run (refused while a step is running)")
     cmd("export", cmd_export, "print the whole journal as JSON")
     return ap

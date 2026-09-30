@@ -22,20 +22,27 @@ def state_dir():
 
 
 def read_md(path):
-    """The header is every line up to the first blank one, each `key: value`; the rest is prose."""
+    """Frontmatter between `---` lines, each `key: value`; the rest is prose. No frontmatter, no keys."""
     with open(path, encoding="utf-8") as fh:
         lines = fh.read().splitlines()
-    keys, i = {}, 0
-    while i < len(lines) and lines[i].strip():
+    if not lines or lines[0].strip() != "---":
+        return {}, "\n".join(lines).strip()
+    try:
+        end = next(n for n in range(1, len(lines)) if lines[n].strip() == "---")
+    except StopIteration:
+        raise ConfigError("%s: frontmatter is not closed with `---`" % path)
+    keys = {}
+    for i in range(1, end):
+        if not lines[i].strip():
+            continue
         m = KEY_RE.match(lines[i])
         if not m:
-            raise ConfigError("%s:%d: header line is not `key: value`: %r" % (path, i + 1, lines[i]))
+            raise ConfigError("%s:%d: frontmatter line is not `key: value`: %r" % (path, i + 1, lines[i]))
         key = m.group(1)
         if key in keys:
             raise ConfigError("%s: duplicate key %r" % (path, key))
         keys[key] = m.group(2).strip()
-        i += 1
-    return keys, "\n".join(lines[i:]).strip()
+    return keys, "\n".join(lines[end + 1:]).strip()
 
 
 def check_keys(keys, allowed, required, path):
@@ -72,8 +79,6 @@ class Profile:
 @dataclass
 class Repo:
     id: str
-    requires: list
-    default: str
     steps: dict
     profiles: dict
     invalid: dict
@@ -122,7 +127,7 @@ def load_profile(path):
     return Profile(stem(path), keys["description"], split_list(keys["steps"]), path)
 
 
-def profile_errors(profile, steps, requires):
+def profile_errors(profile, steps):
     errors, seen = [], set()
     if not profile.description:
         errors.append("empty description")
@@ -134,9 +139,6 @@ def profile_errors(profile, steps, requires):
         seen.add(sid)
         if sid not in steps:
             errors.append("unknown step %r" % sid)
-    for req in requires:
-        if req not in seen:
-            errors.append("missing required step %r" % req)
     return errors
 
 
@@ -147,17 +149,10 @@ def repo_dir(root, repo_id):
 def load_repo(repo_id, root=None):
     root = root or config_dir()
     rdir = repo_dir(root, repo_id)
-    path = os.path.join(rdir, "repo.md")
-    if not os.path.isfile(path):
-        raise ConfigError("no own-pr config for %s (expected %s)" % (repo_id, path))
-    keys, _ = read_md(path)
-    check_keys(keys, ("requires", "default"), ("default",), path)
+    if not os.path.isdir(rdir):
+        raise ConfigError("no own-pr config for %s (expected %s)" % (repo_id, rdir))
     steps = load_steps(os.path.join(root, "steps"))
     steps.update(load_steps(os.path.join(rdir, "steps")))
-    requires = split_list(keys.get("requires", ""))
-    for req in requires:
-        if req not in steps:
-            raise ConfigError("%s: required step %r does not exist" % (path, req))
     profiles, invalid = {}, {}
     for ppath in md_files(os.path.join(rdir, "profiles")):
         try:
@@ -165,15 +160,12 @@ def load_repo(repo_id, root=None):
         except ConfigError as exc:
             invalid[stem(ppath)] = [str(exc)]
             continue
-        errors = profile_errors(profile, steps, requires)
+        errors = profile_errors(profile, steps)
         if errors:
             invalid[profile.name] = errors
         else:
             profiles[profile.name] = profile
-    default = keys["default"]
-    if default != "auto" and default not in profiles:
-        raise ConfigError("%s: default profile %r is not a valid profile" % (path, default))
-    return Repo(repo_id, requires, default, steps, profiles, invalid, path)
+    return Repo(repo_id, steps, profiles, invalid, rdir)
 
 
 def load_origins(root=None):

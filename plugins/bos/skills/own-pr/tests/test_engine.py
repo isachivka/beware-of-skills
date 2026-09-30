@@ -75,8 +75,6 @@ def test_skip_rules(env):
     r = run(j, rid)
     with pytest.raises(engine.RuleError, match="only the human"):
         engine.record_step(j, repo, r, "deploy-rc", "skipped", "attended")
-    with pytest.raises(engine.RuleError, match="required"):
-        engine.record_step(j, repo, r, "ci", "skipped", "attended", note="x", by_human=True)
     with pytest.raises(engine.RuleError, match="the human's reason"):
         engine.record_step(j, repo, r, "deploy-rc", "skipped", "attended", by_human=True)
     engine.record_step(j, repo, r, "deploy-rc", "skipped", "attended", note="no rc", by_human=True)
@@ -155,10 +153,10 @@ def test_switch_to_invalid_profile(env):
 def test_new_step_in_profile_is_picked_up(env, cfg):
     j, repo, rid = env
     finish(j, rid, "pr-draft", "decomment", "eyeball")
-    write(cfg / "steps" / "strip-tests.md", "kind: auto\naway: run\n\nStrip.\n")
+    write(cfg / "steps" / "strip-tests.md", "---\nkind: auto\naway: run\n---\nStrip.\n")
     write(repo_dir(cfg) / "profiles" / "full.md",
-          "description: d\nsteps: pr-draft, strip-tests, decomment, eyeball, review, ci,"
-          " deploy-rc, team-handoff, team-feedback\n")
+          "---\ndescription: d\nsteps: pr-draft, strip-tests, decomment, eyeball, review, ci,"
+          " deploy-rc, team-handoff, team-feedback\n---\n")
     repo = config.load_repo(REPO)
     assert engine.next_action(j, repo, run(j, rid), "attended").step == "strip-tests"
 
@@ -167,8 +165,7 @@ def test_new_step_in_profile_is_picked_up(env, cfg):
 
 def test_broken_profile_is_a_rule_error(env, cfg):
     j, repo, rid = env
-    write(repo_dir(cfg) / "repo.md", "requires: review, ci\ndefault: quick\n")
-    write(repo_dir(cfg) / "profiles" / "full.md", "description: d\nsteps: pr-draft, pr-draft\n")
+    write(repo_dir(cfg) / "profiles" / "full.md", "---\ndescription: d\nsteps: pr-draft, pr-draft\n---\n")
     repo = config.load_repo(REPO)
     with pytest.raises(engine.RuleError, match="duplicate step 'pr-draft'"):
         engine.next_action(j, repo, run(j, rid), "attended")
@@ -196,7 +193,7 @@ def test_running_step_removed_from_profile_is_still_reconciled(env, cfg):
     j, repo, rid = env
     j.set_step(rid, "deploy-rc", "running")
     write(repo_dir(cfg) / "profiles" / "full.md",
-          "description: d\nsteps: pr-draft, decomment, eyeball, review, ci, team-handoff, team-feedback\n")
+          "---\ndescription: d\nsteps: pr-draft, decomment, eyeball, review, ci, team-handoff, team-feedback\n---\n")
     repo = config.load_repo(REPO)
     a = engine.next_action(j, repo, run(j, rid), "attended")
     assert (a.kind, a.step) == ("reconcile", "deploy-rc")
@@ -231,10 +228,10 @@ def test_peek_is_read_only(env):
 
 @pytest.fixture
 def with_merge(cfg, tmp_path):
-    write(cfg / "steps" / "merge.md", "kind: human\naway: wait\n\nThe human merges.\n")
+    write(cfg / "steps" / "merge.md", "---\nkind: human\naway: wait\n---\nThe human merges.\n")
     write(repo_dir(cfg) / "profiles" / "full.md",
-          "description: d\nsteps: pr-draft, decomment, eyeball, review, ci, deploy-rc, team-handoff,"
-          " team-feedback, merge\n")
+          "---\ndescription: d\nsteps: pr-draft, decomment, eyeball, review, ci, deploy-rc, team-handoff,"
+          " team-feedback, merge\n---\n")
     j = Journal(str(tmp_path / "state" / "own-pr.db"))
     repo = config.load_repo(REPO)
     rid = j.create_run(REPO, "feature/x", "/co", "full", "explicit", repo.profiles["full"].steps)

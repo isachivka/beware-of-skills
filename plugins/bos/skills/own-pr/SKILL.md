@@ -17,7 +17,7 @@ you one step at a time together with that step's instructions. Follow them.
 1. **Start once per branch**, in the checkout: `own-pr start`.
    - If the calling flow named an origin or profile, pass `--origin NAME` / `--profile NAME`.
    - If the user named a profile, pass `--profile NAME`.
-   - If it answers with a list of profiles (`default: auto`), pick by the descriptions and run
+   - If it answers with a list of profiles, pick by the descriptions and run
      `own-pr start --profile NAME --auto-reason "<why, one line>"`. Your pick is owed to the user.
 2. **Ask for the next step**: `own-pr next`. It prints `NEXT: <action> <step> (...)`, the PR
    link, notes from the origin flow if any, and the step's instructions.
@@ -64,6 +64,7 @@ Record these only when the user said them in this session:
 | `own-pr step <id> pending` | A finished step must run again; `next` sends you back to it |
 | `own-pr owe "<text>" [--step ID]` | Something the user should look at (shown in `prs owed`) |
 | `own-pr env claim\|release <name>` | Hold a shared resource that other PRs must not use meanwhile |
+| `own-pr watch [--notify]` | Wait for the PR to change (the step says how: Monitor in Claude Code, `--notify` in Codex) |
 | `own-pr adopt <run>` | This session takes over a run another session started |
 | `own-pr close` | End the run |
 | `prs`, `prs owed`, `prs go <pr>` | Every PR in flight, what waits on the user, jump to the owning terminal |

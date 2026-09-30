@@ -135,3 +135,43 @@ def go(journal, target, select):
     if not select(sid):
         raise ValueError("agterm session %s for %s no longer exists" % (sid[:8], t))
     return "switched to agterm session %s" % sid[:8]
+
+
+WATCHED = (("state", "state"), ("reviewDecision", "decision"), ("reviews", "reviews"), ("comments", "comments"))
+
+
+def fingerprint(info):
+    out = {}
+    for key, label in WATCHED:
+        value = info.get(key)
+        out[label] = len(value) if isinstance(value, list) else (value or "-")
+    return out
+
+
+def watch(run, gh, sleep, interval):
+    """Block until the PR's state, review decision, reviews or comments change; say what changed."""
+    base = None
+    while True:
+        info = gh(["pr", "view", run["pr_url"], "--json", "state,reviewDecision,reviews,comments"])
+        if info is not None:
+            now = fingerprint(info)
+            if base is None:
+                base = now
+            elif now != base:
+                return ", ".join("%s %s -> %s" % (k, base[k], now[k]) for k in now if now[k] != base[k])
+        sleep(interval)
+
+
+def real_type(session, pane, text):
+    args = ["agtermctl", "session", "type", "--target", session, text]
+    if pane:
+        args[4:4] = ["--pane", pane]
+    try:
+        return subprocess.run(args, capture_output=True, text=True, timeout=15).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def notify(run, change, typer):
+    text = "own-pr: %s changed (%s). Run `own-pr next`.\n" % (run["pr_url"], change)
+    return typer(run["agterm_session"], run["agterm_pane"], text)

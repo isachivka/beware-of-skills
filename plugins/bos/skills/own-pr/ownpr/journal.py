@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS runs (
   id TEXT PRIMARY KEY, repo TEXT NOT NULL, branch TEXT NOT NULL, checkout TEXT NOT NULL,
   pr_url TEXT, pr_number INTEGER, origin TEXT, profile TEXT NOT NULL, profile_by TEXT NOT NULL,
   mode_env TEXT, mode_run TEXT, claude_session TEXT, codex_session TEXT, agterm_session TEXT,
+  agterm_pane TEXT,
   state TEXT NOT NULL DEFAULT 'open', created REAL NOT NULL, updated REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS steps (
   run_id TEXT NOT NULL, step TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
@@ -27,7 +28,9 @@ CREATE TABLE IF NOT EXISTS events (
 """
 STATUSES = ("pending", "running", "done", "failed", "deferred", "skipped")
 UPDATABLE = ("pr_url", "pr_number", "profile", "profile_by", "mode_run",
-             "claude_session", "codex_session", "agterm_session")
+             "claude_session", "codex_session", "agterm_session", "agterm_pane")
+# columns added after the first release; an older journal gets them on open
+ADDED_COLUMNS = {"runs": ("agterm_pane TEXT",)}
 
 
 class JournalError(Exception):
@@ -41,6 +44,11 @@ class Journal:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
+        for table, columns in ADDED_COLUMNS.items():
+            have = {r["name"] for r in self.db.execute("PRAGMA table_info(%s)" % table)}
+            for column in columns:
+                if column.split()[0] not in have:
+                    self.db.execute("ALTER TABLE %s ADD COLUMN %s" % (table, column))
 
     @contextlib.contextmanager
     def tx(self):
@@ -75,10 +83,11 @@ class Journal:
                                    % (repo, branch, existing["id"], existing["id"]))
             self.db.execute(
                 "INSERT INTO runs (id, repo, branch, checkout, origin, profile, profile_by, mode_env,"
-                " claude_session, codex_session, agterm_session, created, updated)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " claude_session, codex_session, agterm_session, agterm_pane, created, updated)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (run_id, repo, branch, checkout, origin, profile, profile_by, mode_env,
-                 ident.get("claude"), ident.get("codex"), ident.get("agterm"), now, now))
+                 ident.get("claude"), ident.get("codex"), ident.get("agterm"), ident.get("pane"),
+                 now, now))
             for step in steps:
                 self.db.execute("INSERT INTO steps (run_id, step) VALUES (?, ?)", (run_id, step))
             self._event(run_id, "start", profile=profile, profile_by=profile_by, origin=origin)
