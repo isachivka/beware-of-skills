@@ -324,9 +324,34 @@ def own_pr_parser():
     return ap
 
 
+def prs_main(argv):
+    from . import overview
+    ap = argparse.ArgumentParser(prog="prs", description="Igor's own PRs in flight.")
+    ap.add_argument("--no-gh", action="store_true", help="do not ask GitHub")
+    sub = ap.add_subparsers(dest="cmd")
+    sub.add_parser("owed")
+    p = sub.add_parser("go")
+    p.add_argument("pr", help="N, #N, owner/repo#N, PR url or run id")
+    args = ap.parse_args(argv)
+    try:
+        j = open_journal()
+        if args.cmd == "owed":
+            print(overview.owed_report(j))
+        elif args.cmd == "go":
+            print(overview.go(j, args.pr, overview.real_select))
+        else:
+            print(overview.table(j, (lambda a: None) if args.no_gh else overview.real_gh))
+    except (ValueError,) + ERRORS as exc:
+        print("prs: %s" % exc, file=sys.stderr)
+        return 2
+    return 0
+
+
 def main(argv=None, prog=None):
     argv = sys.argv[1:] if argv is None else argv
     prog = prog or os.path.basename(sys.argv[0])
+    if prog == "prs":
+        return prs_main(argv)
     parser = own_pr_parser()
     args = parser.parse_args(argv)
     try:
