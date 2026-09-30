@@ -62,17 +62,17 @@ def mode_label(mode, source):
     return "%s (%s)" % (mode, source) if source else mode
 
 
-def next_action(journal, repo, run, mode, mode_source=None):
+def peek(journal, repo, run, mode):
+    """The next action without side effects; `next_action` applies the away-mode deferrals."""
     order = profile_steps(repo, run)
-    journal.ensure_steps(run["id"], order)
     states = journal.steps(run["id"])
     # a step dropped from the profile while it was running still has to be reconciled
-    running = [s for s in order if states[s]["status"] == "running"]
+    running = [s for s in order if states.get(s, {}).get("status") == "running"]
     running += [s for s, v in states.items() if v["status"] == "running" and s not in order]
     if running:
         return Action("reconcile", running[0], mode)
     for sid in order:
-        status, step = states[sid]["status"], repo.steps[sid]
+        status, step = states.get(sid, {}).get("status", "pending"), repo.steps[sid]
         if status in ("done", "skipped"):
             continue
         if sid == "team-handoff":
@@ -87,14 +87,30 @@ def next_action(journal, repo, run, mode, mode_source=None):
             continue
         if mode == "away" and step.kind == "human":
             if step.away == "defer":
-                journal.set_step(run["id"], sid, "deferred", note="deferred while away", by="agent",
-                                 mode=mode_label(mode, mode_source))
-                journal.add_owed(run["id"], "%s deferred while you were away" % sid, step=sid)
                 continue
             if step.away == "auto-pick":
                 return Action("do", sid, mode, auto_pick=True)
         return Action("do", sid, mode)
     return Action("done", None, mode)
+
+
+def next_action(journal, repo, run, mode, mode_source=None):
+    order = profile_steps(repo, run)
+    journal.ensure_steps(run["id"], order)
+    action = peek(journal, repo, run, mode)
+    if mode != "away" or action.kind == "reconcile":
+        return action
+    states = journal.steps(run["id"])
+    stop = order.index(action.step) if action.step in order else len(order)
+    for sid in order[:stop]:
+        step = repo.steps[sid]
+        if states[sid]["status"] == "pending" and step.kind == "human" and step.away == "defer":
+            journal.set_step(run["id"], sid, "deferred", note="deferred while away", by="agent",
+                             mode=mode_label(mode, mode_source))
+            journal.add_owed(run["id"], "%s deferred while you were away" % sid, step=sid)
+    if action.kind == "blocked":
+        action.blockers = handoff_blockers(journal, repo, run)
+    return action
 
 
 def record_step(journal, repo, run, step_id, status, mode, evidence=None, note=None, by_igor=False,

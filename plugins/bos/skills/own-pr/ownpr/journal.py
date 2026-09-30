@@ -125,9 +125,9 @@ class Journal:
         with self.tx():
             cur = self.db.execute(
                 "UPDATE steps SET status = ?, attempts = attempts + ?,"
-                " evidence = COALESCE(?, evidence), note = COALESCE(?, note), by = ?, updated = ?"
-                " WHERE run_id = ? AND step = ?",
-                (status, 1 if status == "running" else 0, evidence, note, by, time.time(),
+                " evidence = CASE WHEN ? = 'pending' THEN NULL ELSE COALESCE(?, evidence) END,"
+                " note = COALESCE(?, note), by = ?, updated = ? WHERE run_id = ? AND step = ?",
+                (status, 1 if status == "running" else 0, status, evidence, note, by, time.time(),
                  run_id, step))
             if cur.rowcount == 0:
                 raise JournalError("run %s has no step %r" % (run_id, step))

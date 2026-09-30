@@ -61,6 +61,7 @@ Record these only when Igor said them in this session:
 | --- | --- |
 | `own-pr explain` | The resolved step list and every setting with the file it came from |
 | `own-pr handoff-check` | What still blocks the team handoff |
+| `own-pr step <id> pending` | A finished step must run again (e.g. CI after new fixes); `next` sends you back to it |
 | `own-pr owe "<text>" [--step ID]` | Something Igor must look at before handoff |
 | `own-pr env claim\|release rc09` | Hold a shared desk while deploy, manual check and autotests use it |
 | `own-pr adopt <run>` | This session takes over a run another session started |

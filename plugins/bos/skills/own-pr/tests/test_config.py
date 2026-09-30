@@ -124,3 +124,9 @@ def test_machine_mode_precedence(cfg, tmp_path):
     flag = tmp_path / "state" / "mode"
     write(flag, "attended\n")
     assert config.machine_mode() == ("attended", str(flag))
+
+
+def test_required_step_after_handoff(cfg):
+    write(repo_dir(cfg) / "profiles" / "late.md",
+          "description: d\nsteps: pr-draft, eyeball, team-handoff, review, ci\n")
+    assert "required step 'review' after team-handoff" in config.load_repo(REPO).invalid["late"]

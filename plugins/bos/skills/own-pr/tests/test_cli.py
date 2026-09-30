@@ -224,3 +224,12 @@ def test_non_utf8_config_is_an_error_not_a_traceback(cfg, checkout, capsys):
     (cfg / "steps" / "ci.md").write_bytes(b"kind: auto\naway: run\n\n\xff\n")
     code, _, err = own(capsys, "explain")
     assert code == 2 and err.startswith("own-pr: ")
+
+
+def test_closed_run_is_read_only(cfg, checkout, capsys):
+    own(capsys, "start")
+    rid = cli.open_journal().open_runs()[0]["id"]
+    own(capsys, "close")
+    for argv in (("--run", rid, "next"), ("--run", rid, "env", "claim", "rc09"), ("adopt", rid)):
+        code, _, err = own(capsys, *argv)
+        assert code == 2 and "closed" in err

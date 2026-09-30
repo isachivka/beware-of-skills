@@ -135,8 +135,11 @@ def profile_errors(profile, steps, requires):
         if req not in seen:
             errors.append("missing required step %r" % req)
     if "team-handoff" in seen:
-        if "eyeball" not in profile.steps[:profile.steps.index("team-handoff")]:
+        before = profile.steps[:profile.steps.index("team-handoff")]
+        if "eyeball" not in before:
             errors.append("team-handoff without eyeball before it")
+        errors += ["required step %r after team-handoff" % r for r in requires
+                   if r in seen and r not in before]
     return errors
 
 

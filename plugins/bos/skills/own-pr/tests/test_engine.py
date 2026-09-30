@@ -261,3 +261,22 @@ def test_done_when_all_finished(env):
     j, repo, rid = env
     finish(j, rid, *repo.profiles["full"].steps)
     assert engine.next_action(j, repo, run(j, rid), "attended").kind == "done"
+
+
+def test_pending_requeues_a_done_step(env):
+    j, repo, rid = env
+    finish(j, rid, "pr-draft", "decomment", "eyeball", "review")
+    j.set_step(rid, "ci", "done", evidence="https://ci/old")
+    engine.record_step(j, repo, run(j, rid), "ci", "pending", "attended")
+    assert j.steps(rid)["ci"]["evidence"] is None
+    a = engine.next_action(j, repo, run(j, rid), "attended")
+    assert (a.kind, a.step) == ("do", "ci")
+
+
+def test_peek_is_read_only(env):
+    j, repo, rid = env
+    finish(j, rid, "pr-draft", "decomment")
+    a = engine.peek(j, repo, run(j, rid), "away")
+    assert (a.kind, a.step, a.auto_pick) == ("do", "review", True)
+    assert j.steps(rid)["eyeball"]["status"] == "pending"
+    assert j.open_owed(rid) == []

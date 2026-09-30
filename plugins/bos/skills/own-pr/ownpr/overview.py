@@ -53,17 +53,12 @@ def ago(ts, now=None):
     return "%dd" % (d // 86400)
 
 
-def now_label(states, order):
-    for sid in order:
-        if states.get(sid, {}).get("status") == "running":
-            return "%s running" % sid
-    for sid in order:
-        status = states.get(sid, {}).get("status", "pending")
-        if status == "failed":
-            return "%s failed" % sid
-        if status == "pending":
-            return "%s next" % sid
-    return "done"
+def label(action):
+    if action.kind == "done":
+        return "done"
+    if action.kind == "blocked":
+        return "handoff blocked"
+    return "%s %s" % (action.step, {"reconcile": "running", "retry": "failed"}.get(action.kind, "next"))
 
 
 def short_repo(repo_id):
@@ -93,8 +88,8 @@ def table(journal, gh):
                 notes.append("closed run %s: PR is %s" % (run["id"], state.lower()))
                 continue
         try:
-            order = engine.profile_steps(config.load_repo(run["repo"]), run)
-            now = now_label(states, order)
+            mode, _ = engine.effective_mode(run, config.machine_mode())
+            now = label(engine.peek(journal, config.load_repo(run["repo"]), run, mode))
         except (config.ConfigError, engine.RuleError):
             now = "config error"
         if state in ("MERGED", "CLOSED"):

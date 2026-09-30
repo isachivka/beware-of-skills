@@ -26,7 +26,10 @@ def open_journal():
 
 def current_run(j, args):
     if getattr(args, "run", None):
-        return j.run(args.run)
+        run = j.run(args.run)
+        if run["state"] != "open":
+            raise Fail("run %s is closed" % run["id"])
+        return run
     co = context.checkout(os.getcwd())
     run = j.find_open_run(co["repo"], co["branch"])
     if not run:
@@ -253,7 +256,8 @@ def cmd_env(args, j):
 
 
 def cmd_adopt(args, j):
-    j.run(args.target)
+    if j.run(args.target)["state"] != "open":
+        raise Fail("run %s is closed" % args.target)
     ident = context.identity(os.environ)
     j.update_run(args.target, claude_session=ident["claude"], codex_session=ident["codex"],
                  agterm_session=ident["agterm"])
@@ -288,7 +292,7 @@ def own_pr_parser():
     sub.add_parser("next").set_defaults(fn=cmd_next)
     p = sub.add_parser("step")
     p.add_argument("step")
-    p.add_argument("status", choices=("running", "done", "failed", "skipped", "deferred"))
+    p.add_argument("status", choices=("pending", "running", "done", "failed", "skipped", "deferred"))
     p.add_argument("--evidence")
     p.add_argument("--note")
     p.add_argument("--by-igor", action="store_true")

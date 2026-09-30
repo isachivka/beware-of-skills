@@ -1,7 +1,7 @@
 import pytest
 
 from conftest import REPO
-from ownpr import cli, config, overview
+from ownpr import cli, config, engine, overview
 from ownpr.journal import Journal
 
 URL = "https://github.com/pdffiller/jsfiller/pull/13300"
@@ -47,15 +47,25 @@ def test_ago():
     assert overview.ago(1000, now=1000 + 3 * 86400) == "3d"
 
 
-def test_now_label():
-    order = ["a", "b", "c"]
-    assert overview.now_label({"a": {"status": "done"}, "b": {"status": "running"},
-                               "c": {"status": "pending"}}, order) == "b running"
-    assert overview.now_label({"a": {"status": "done"}, "b": {"status": "failed"},
-                               "c": {"status": "pending"}}, order) == "b failed"
-    assert overview.now_label({"a": {"status": "done"}, "b": {"status": "deferred"},
-                               "c": {"status": "pending"}}, order) == "c next"
-    assert overview.now_label({s: {"status": "done"} for s in order}, order) == "done"
+def test_label():
+    assert overview.label(engine.Action("reconcile", "ci")) == "ci running"
+    assert overview.label(engine.Action("retry", "ci")) == "ci failed"
+    assert overview.label(engine.Action("do", "ci")) == "ci next"
+    assert overview.label(engine.Action("blocked", "team-handoff")) == "handoff blocked"
+    assert overview.label(engine.Action("done")) == "done"
+
+
+def test_now_reflects_mode_and_barrier(j):
+    rid = start(j, "feature/x", URL)
+    for s in ("pr-draft", "decomment", "review", "ci", "deploy-rc"):
+        j.set_step(rid, s, "done", by="igor")
+
+    def row():
+        return next(l for l in overview.table(j, lambda a: None).splitlines() if l.startswith("#13300"))
+    j.update_run(rid, mode_run="away")
+    assert "handoff blocked" in row()
+    j.update_run(rid, mode_run="attended")
+    assert "eyeball next" in row()
 
 
 def test_table(j):
