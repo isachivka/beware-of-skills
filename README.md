@@ -249,24 +249,78 @@ ready, when to review, who to ping. own-pr takes that tail away from all of them
 that did the work hands off to it and keeps driving the PR itself, so review feedback never
 has to move to another terminal.
 
-The process lives in `~/.config/own-pr/` as Markdown: a library of steps, per-repo profiles
-("full" with rc deploy and autotests, "quick" without), and per-flow origins. Edit a file and
-the next step of every PR in flight follows the new text. `own-pr next` hands the agent one
-step at a time with its instructions; `own-pr step` records what happened.
+The process lives in `~/.config/own-pr/` as Markdown files with frontmatter, like skills.
+Edit a file and the next step of every PR in flight follows the new text. `own-pr next`
+hands the agent one step at a time with its instructions; `own-pr step` records what
+happened.
+
+```
+~/.config/own-pr/
+  config.md                                 mode: attended | away (machine default)
+  repos/github.com/acme/app/
+    profiles/feature.md                     which steps, in what order
+    steps/pr-open.md                        one file per step
+    steps/review.md
+    steps/merge.md
+  steps/                                    optional: steps shared by every repo
+  origins/<flow>.md                         optional: a flow's default profile and notes
+```
+
+A step is a few keys and the instruction the agent gets. Keep it short and point at the
+skill that does the work: `/skill | $skill` reads for both Claude Code and Codex.
+
+```markdown
+---
+kind: human
+away: auto-pick
+---
+Run /crit-review | $crit-review.
+
+Attended: once the human has made their picks in its revdiff, record done `--by-human`.
+Away: make the picks yourself and record done with `--note` listing what you took and why.
+```
+
+`kind` is `auto` (the agent does it) or `human`. `away` says what a human step does while
+you are away: `defer` (skip it, owe it to you), `auto-pick` (the agent decides and owes you
+the decision) or `wait` (never skipped, e.g. merge). Auto steps take `away: run`.
+
+A profile is a description and an ordered list of steps:
+
+```markdown
+---
+description: Types only, logic unchanged. Ready PR, no deploy, tests kept.
+steps: pr-open, decomment, ci, review, team-handoff, team-feedback, merge
+---
+```
+
+The session that did the work then goes:
 
 ```bash
-own-pr start            # once per branch
-own-pr next             # what to do now, with the step's instructions
+own-pr start --profile feature   # once per branch
+own-pr next                      # NEXT: do pr-open  (kind=auto, mode=attended) + the step text
+own-pr bind https://github.com/acme/app/pull/42
+own-pr step pr-open done --evidence https://github.com/acme/app/pull/42
+own-pr next                      # NEXT: do decomment ...
+own-pr step ci running           # before a long wait
+own-pr watch                     # wait for reviews, comments, merge (Monitor in Claude, --notify in Codex)
+```
+
+And you, from any terminal:
+
+```bash
 own-pr away             # I'm leaving: defer my steps, keep everything else moving
 prs                     # every PR in flight: step, what waits on me, CI, terminal
 prs owed                # what waits on me
-prs go 13300            # jump to the terminal driving that PR
+prs go 42               # jump to the terminal driving that PR
+own-pr explain          # this checkout's resolved steps, with the file each came from
 ```
 
-Steps are `auto` or `human`. When you are away, every step runs except yours: those are
-deferred or decided by the agent, and pile up as owed items in `prs owed`. A step marked
-`away: wait` (merging, say) is never skipped: the pipeline stops there until you do it. The
-CLI knows no step by name; what a step means lives only in its file.
+Every command has `--help` with the details.
+
+When you are away, every step runs except yours: those are deferred or decided by the agent,
+and pile up as owed items in `prs owed`. A step marked `away: wait` is never skipped: the
+pipeline stops there until you do it. The CLI knows no step by name; what a step means lives
+only in its file.
 
 State is one SQLite file in `~/.local/state/own-pr/`. Python 3 stdlib, `gh`, `git`; `prs go`
 needs [agterm](https://github.com/umputun/agterm).
