@@ -49,3 +49,23 @@ def cfg(tmp_path, monkeypatch):
                 "CODEX_THREAD_ID", "AGTERM_SESSION_ID"):
         monkeypatch.delenv(key, raising=False)
     return root
+
+import subprocess
+
+
+def git(cwd, *args):
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                    "-c", "commit.gpgsign=false", *args],
+                   cwd=str(cwd), check=True, capture_output=True)
+
+
+@pytest.fixture
+def checkout(tmp_path, monkeypatch):
+    repo = tmp_path / "jsfiller"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "develop")
+    git(repo, "commit", "-q", "--allow-empty", "-m", "init")
+    git(repo, "remote", "add", "origin", "git@github.com:pdffiller/jsfiller.git")
+    git(repo, "checkout", "-q", "-b", "feature/x")
+    monkeypatch.chdir(repo)
+    return repo
