@@ -256,7 +256,7 @@ step at a time with its instructions; `own-pr step` records what happened.
 own-pr start            # once per branch
 own-pr next             # what to do now, with the step's instructions
 own-pr away             # I'm leaving: defer my steps, keep everything else moving
-prs                     # every PR in flight: step, what waits on me, CI, rc, terminal
+prs                     # every PR in flight: step, what waits on me, CI, terminal
 prs owed                # what waits on me
 prs go 13300            # jump to the terminal driving that PR
 ```

@@ -19,7 +19,7 @@ def run(j, rid):
 
 def finish(j, rid, *steps):
     for s in steps:
-        j.set_step(rid, s, "done", by="igor")
+        j.set_step(rid, s, "done", by="human")
 
 
 def test_effective_mode():
@@ -73,24 +73,24 @@ def test_attended_returns_to_deferred_step(env):
 def test_skip_rules(env):
     j, repo, rid = env
     r = run(j, rid)
-    with pytest.raises(engine.RuleError, match="only Igor"):
+    with pytest.raises(engine.RuleError, match="only the human"):
         engine.record_step(j, repo, r, "deploy-rc", "skipped", "attended")
     with pytest.raises(engine.RuleError, match="required"):
-        engine.record_step(j, repo, r, "ci", "skipped", "attended", note="x", by_igor=True)
-    with pytest.raises(engine.RuleError, match="Igor's reason"):
-        engine.record_step(j, repo, r, "deploy-rc", "skipped", "attended", by_igor=True)
-    engine.record_step(j, repo, r, "deploy-rc", "skipped", "attended", note="no rc", by_igor=True)
-    assert j.steps(rid)["deploy-rc"]["by"] == "igor"
+        engine.record_step(j, repo, r, "ci", "skipped", "attended", note="x", by_human=True)
+    with pytest.raises(engine.RuleError, match="the human's reason"):
+        engine.record_step(j, repo, r, "deploy-rc", "skipped", "attended", by_human=True)
+    engine.record_step(j, repo, r, "deploy-rc", "skipped", "attended", note="no rc", by_human=True)
+    assert j.steps(rid)["deploy-rc"]["by"] == "human"
 
 
-def test_human_step_needs_igor(env):
+def test_human_step_needs_the_human(env):
     j, repo, rid = env
     r = run(j, rid)
-    with pytest.raises(engine.RuleError, match="Igor's step"):
+    with pytest.raises(engine.RuleError, match="the human's step"):
         engine.record_step(j, repo, r, "eyeball", "done", "attended")
-    with pytest.raises(engine.RuleError, match="Igor's step"):
+    with pytest.raises(engine.RuleError, match="the human's step"):
         engine.record_step(j, repo, r, "review", "done", "attended", note="picked")
-    engine.record_step(j, repo, r, "eyeball", "done", "attended", by_igor=True)
+    engine.record_step(j, repo, r, "eyeball", "done", "attended", by_human=True)
     assert j.steps(rid)["eyeball"]["status"] == "done"
 
 
@@ -103,10 +103,10 @@ def test_auto_pick_in_away_owes_the_decision(env):
     assert j.open_owed(rid)[0]["text"] == "review decided by the agent: took 3, declined 2"
 
 
-def test_igor_done_clears_owed_for_step(env):
+def test_human_done_clears_owed_for_step(env):
     j, repo, rid = env
     j.add_owed(rid, "eyeball deferred", step="eyeball")
-    engine.record_step(j, repo, run(j, rid), "eyeball", "done", "attended", by_igor=True)
+    engine.record_step(j, repo, run(j, rid), "eyeball", "done", "attended", by_human=True)
     assert j.open_owed(rid) == []
 
 
@@ -115,9 +115,9 @@ def test_clearing_deferred_item_completes_the_step(env):
     finish(j, rid, "pr-draft", "decomment")
     engine.next_action(j, repo, run(j, rid), "away")
     owed = j.open_owed(rid)[0]["id"]
-    engine.clear_owed(j, run(j, rid), owed, by_igor=True)
+    engine.clear_owed(j, run(j, rid), owed, by_human=True)
     eyeball = j.steps(rid)["eyeball"]
-    assert (eyeball["status"], eyeball["by"]) == ("done", "igor")
+    assert (eyeball["status"], eyeball["by"]) == ("done", "human")
 
 
 def test_deferred_is_not_recorded_by_hand(env):
@@ -138,9 +138,9 @@ def test_switch_profile(env):
     j, repo, rid = env
     j.set_step(rid, "ci", "running")
     with pytest.raises(engine.RuleError, match="ci is running"):
-        engine.switch_profile(j, repo, run(j, rid), "quick", by_igor=True)
+        engine.switch_profile(j, repo, run(j, rid), "quick", by_human=True)
     j.set_step(rid, "ci", "done")
-    added, removed = engine.switch_profile(j, repo, run(j, rid), "quick", by_igor=False)
+    added, removed = engine.switch_profile(j, repo, run(j, rid), "quick", by_human=False)
     assert (added, removed) == ([], ["decomment", "deploy-rc"])
     assert run(j, rid)["profile"] == "quick"
     assert "dropping decomment, deploy-rc" in j.open_owed(rid)[0]["text"]
@@ -149,7 +149,7 @@ def test_switch_profile(env):
 def test_switch_to_invalid_profile(env):
     j, repo, rid = env
     with pytest.raises(engine.RuleError, match="no valid profile 'nope'"):
-        engine.switch_profile(j, repo, run(j, rid), "nope", by_igor=True)
+        engine.switch_profile(j, repo, run(j, rid), "nope", by_human=True)
 
 
 def test_new_step_in_profile_is_picked_up(env, cfg):
@@ -231,7 +231,7 @@ def test_peek_is_read_only(env):
 
 @pytest.fixture
 def with_merge(cfg, tmp_path):
-    write(cfg / "steps" / "merge.md", "kind: human\naway: wait\n\nIgor merges.\n")
+    write(cfg / "steps" / "merge.md", "kind: human\naway: wait\n\nThe human merges.\n")
     write(repo_dir(cfg) / "profiles" / "full.md",
           "description: d\nsteps: pr-draft, decomment, eyeball, review, ci, deploy-rc, team-handoff,"
           " team-feedback, merge\n")
@@ -263,7 +263,7 @@ def test_wait_step_stops_away_mode(with_merge):
     finish(j, rid, "team-handoff", "team-feedback")
     a = engine.next_action(j, repo, run(j, rid), "away")
     assert (a.kind, a.step, a.waits) == ("do", "merge", True)
-    with pytest.raises(engine.RuleError, match="Igor's step"):
+    with pytest.raises(engine.RuleError, match="the human's step"):
         engine.record_step(j, repo, run(j, rid), "merge", "done", "away", note="merged it")
     assert j.steps(rid)["merge"]["status"] == "pending"
 

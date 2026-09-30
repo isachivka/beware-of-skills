@@ -85,7 +85,7 @@ class Repo:
 class Origin:
     name: str
     root: str
-    stamp: str
+    notes: str
     profiles: dict
     source: str
 
@@ -181,15 +181,15 @@ def load_origins(root=None):
     root = root or config_dir()
     origins, roots = {}, {}
     for path in md_files(os.path.join(root, "origins")):
-        keys, _ = read_md(path)
-        check_keys(keys, ("root", "stamp", "profile."), ("root",), path)
+        keys, notes = read_md(path)
+        check_keys(keys, ("root", "profile."), ("root",), path)
         name = stem(path)
         oroot = os.path.realpath(os.path.expanduser(keys["root"]))
         if oroot in roots:
             raise ConfigError("origins %r and %r share root %s" % (roots[oroot], name, oroot))
         roots[oroot] = name
         profiles = {k[len("profile."):]: v for k, v in keys.items() if k.startswith("profile.")}
-        origins[name] = Origin(name, oroot, keys.get("stamp", ""), profiles, path)
+        origins[name] = Origin(name, oroot, notes, profiles, path)
     return origins
 
 

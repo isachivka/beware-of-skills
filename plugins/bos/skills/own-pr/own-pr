@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""own-pr / prs — drive Igor's own pull requests; see SKILL.md."""
+"""own-pr / prs — drive your own pull requests; see SKILL.md."""
 import os
 import sys
 

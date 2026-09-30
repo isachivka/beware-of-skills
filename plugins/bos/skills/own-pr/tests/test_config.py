@@ -94,10 +94,10 @@ def test_missing_repo_config(cfg):
 
 def test_origins(cfg, tmp_path):
     write(cfg / "origins" / "ws-observability.md",
-          "root: %s\nstamp: 🤖 WS Agent\nprofile.%s: quick\n" % (tmp_path / "wso", REPO))
+          "root: %s\nprofile.%s: quick\n\nStart every Slack post with 🤖 WS Agent.\n" % (tmp_path / "wso", REPO))
     origins = config.load_origins()
     o = origins["ws-observability"]
-    assert o.stamp == "🤖 WS Agent"
+    assert o.notes == "Start every Slack post with 🤖 WS Agent."
     assert o.profiles == {REPO: "quick"}
     assert o.root.endswith("wso")
 
@@ -127,7 +127,7 @@ def test_machine_mode_precedence(cfg, tmp_path):
 
 
 def test_away_wait_is_a_valid_value(cfg):
-    write(cfg / "steps" / "merge.md", "kind: human\naway: wait\n\nIgor merges.\n")
+    write(cfg / "steps" / "merge.md", "kind: human\naway: wait\n\nThe human merges.\n")
     assert config.load_repo(REPO).steps["merge"].away == "wait"
 
 
@@ -140,3 +140,9 @@ def test_away_value_must_fit_kind(cfg):
     write(cfg / "steps" / "eyeball.md", "kind: human\naway: run\n")
     with pytest.raises(config.ConfigError, match="a human step takes away: defer|auto-pick|wait"):
         config.load_repo(REPO)
+
+
+def test_origin_stamp_key_is_gone(cfg, tmp_path):
+    write(cfg / "origins" / "a.md", "root: %s\nstamp: x\n" % tmp_path)
+    with pytest.raises(config.ConfigError, match="unknown key 'stamp'"):
+        config.load_origins()

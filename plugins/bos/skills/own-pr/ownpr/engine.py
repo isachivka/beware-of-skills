@@ -17,7 +17,7 @@ class Action:
 
 def effective_mode(run, machine):
     if run.get("mode_run"):
-        return run["mode_run"], "run (Igor in session)"
+        return run["mode_run"], "run (set in session)"
     if run.get("mode_env"):
         return run["mode_env"], "terminal OWN_PR_MODE"
     return machine
@@ -83,27 +83,27 @@ def next_action(journal, repo, run, mode, mode_source=None):
     return action
 
 
-def record_step(journal, repo, run, step_id, status, mode, evidence=None, note=None, by_igor=False,
+def record_step(journal, repo, run, step_id, status, mode, evidence=None, note=None, by_human=False,
                 mode_source=None):
     order = profile_steps(repo, run)
     in_flight = journal.steps(run["id"]).get(step_id, {}).get("status") == "running"
     if step_id not in order and not (in_flight and status in ("done", "failed")):
         raise RuleError("step %r is not in profile %s" % (step_id, run["profile"]))
-    step, by = repo.steps.get(step_id), ("igor" if by_igor else "agent")
+    step, by = repo.steps.get(step_id), ("human" if by_human else "agent")
     label = mode_label(mode, mode_source)
     if status == "deferred":
         raise RuleError("deferral is decided by `own-pr next`, not recorded by hand")
     if status == "skipped":
-        if not by_igor:
-            raise RuleError("only Igor skips a step; record it with --by-igor once he has said so")
+        if not by_human:
+            raise RuleError("only the human skips a step; record it with --by-human once they have said so")
         if step_id in repo.requires:
             raise RuleError("%s is required by %s and cannot be skipped" % (step_id, repo.id))
         if not note:
-            raise RuleError("a skip needs --note with Igor's reason")
+            raise RuleError("a skip needs --note with the human's reason")
         journal.set_step(run["id"], step_id, "skipped", evidence, note, by, mode=label)
         return
     if status == "done" and step and step.kind == "human":
-        if by_igor:
+        if by_human:
             journal.set_step(run["id"], step_id, "done", evidence, note, by, mode=label)
             journal.clear_owed_for_step(run["id"], step_id)
             return
@@ -113,23 +113,23 @@ def record_step(journal, repo, run, step_id, status, mode, evidence=None, note=N
             journal.set_step(run["id"], step_id, "done", evidence, note, by, mode=label)
             journal.add_owed(run["id"], "%s decided by the agent: %s" % (step_id, note), step=step_id)
             return
-        raise RuleError("%s is Igor's step; record done with --by-igor once he has done it" % step_id)
+        raise RuleError("%s is the human's step; record done with --by-human once they have done it" % step_id)
     journal.set_step(run["id"], step_id, status, evidence, note, by, mode=label)
 
 
-def clear_owed(journal, run, owed_id, by_igor=False):
-    if not by_igor:
-        raise RuleError("only Igor discharges an owed item; record it with --by-igor once he has looked")
+def clear_owed(journal, run, owed_id, by_human=False):
+    if not by_human:
+        raise RuleError("only the human discharges an owed item; record it with --by-human once they have looked")
     item = journal.owed(owed_id)
     if item["run_id"] != run["id"]:
         raise RuleError("owed item %s belongs to run %s" % (owed_id, item["run_id"]))
     journal.clear_owed(owed_id)
     step = item["step"]
     if step and journal.steps(run["id"]).get(step, {}).get("status") == "deferred":
-        journal.set_step(run["id"], step, "done", note="cleared by Igor", by="igor")
+        journal.set_step(run["id"], step, "done", note="cleared by the human", by="human")
 
 
-def switch_profile(journal, repo, run, name, by_igor):
+def switch_profile(journal, repo, run, name, by_human):
     if name not in repo.profiles:
         why = "; ".join(repo.invalid.get(name, ["not found"]))
         raise RuleError("no valid profile %r in %s: %s" % (name, repo.id, why))
@@ -141,8 +141,8 @@ def switch_profile(journal, repo, run, name, by_igor):
     added = [s for s in new if s not in old]
     removed = [s for s in old if s not in new]
     journal.ensure_steps(run["id"], new)
-    journal.update_run(run["id"], profile=name, profile_by="explicit" if by_igor else "agent")
-    if removed and not by_igor:
+    journal.update_run(run["id"], profile=name, profile_by="explicit" if by_human else "agent")
+    if removed and not by_human:
         journal.add_owed(run["id"], "agent switched profile %s -> %s, dropping %s"
                          % (run["profile"], name, ", ".join(removed)))
     return added, removed

@@ -55,7 +55,7 @@ def choose_profile(repo, origin, args):
     if repo.default != "auto":
         return repo.default, "repo default"
     lines = ["%s has `default: auto`: choose a profile and rerun with"
-             " --profile NAME --auto-reason WHY (or the one Igor named, without --auto-reason):" % repo.id]
+             " --profile NAME --auto-reason WHY (or the one the human named, without --auto-reason):" % repo.id]
     lines += ["  %s: %s" % (p.name, p.description) for p in repo.profiles.values()]
     raise Fail("\n".join(lines))
 
@@ -92,7 +92,7 @@ def cmd_bind(args, j):
     return 0
 
 
-def render_action(action, repo, run, stamp, added, evidence=None):
+def render_action(action, repo, run, origin, added, evidence=None):
     lines = ["NEW: step %s was added to profile %s since this run started" % (s, run["profile"])
              for s in added]
     if action.kind == "done":
@@ -104,9 +104,9 @@ def render_action(action, repo, run, stamp, added, evidence=None):
                                    "ended and record done or failed.")
     extra = ""
     if action.auto_pick:
-        extra = ", agent decides — record done with --note; it becomes owed to Igor"
+        extra = ", agent decides — record done with --note; it becomes owed to the human"
     elif action.waits:
-        extra = ", Igor's step — ask him and wait"
+        extra = ", the human's step — ask them and wait"
     lines.append("NEXT: %s %s  (kind=%s, mode=%s%s)" % (action.kind, action.step, kind,
                                                          action.mode, extra))
     if action.kind == "reconcile":
@@ -114,19 +114,16 @@ def render_action(action, repo, run, stamp, added, evidence=None):
     if action.kind == "retry":
         lines.append("This step failed last time: fix the cause, then run it again.")
     lines.append("PR: %s" % (run["pr_url"] or "(none yet)"))
-    if stamp:
-        lines.append("Stamp: %s" % stamp)
+    if origin and origin.notes:
+        lines.append("Origin %s: %s" % (origin.name, origin.notes))
     if evidence:
         lines.append("Evidence so far: %s" % evidence)
     lines += ["", body]
     return "\n".join(lines)
 
 
-def origin_stamp(run):
-    if not run["origin"]:
-        return ""
-    origin = config.load_origins().get(run["origin"])
-    return origin.stamp if origin else ""
+def run_origin(run):
+    return config.load_origins().get(run["origin"]) if run["origin"] else None
 
 
 def cmd_next(args, j):
@@ -136,7 +133,7 @@ def cmd_next(args, j):
     added = [s for s in engine.profile_steps(repo, run) if s not in j.steps(run["id"])]
     action = engine.next_action(j, repo, run, mode, mode_source=source)
     evidence = j.steps(run["id"]).get(action.step, {}).get("evidence") if action.step else None
-    print(render_action(action, repo, j.run(run["id"]), origin_stamp(run), added, evidence))
+    print(render_action(action, repo, j.run(run["id"]), run_origin(run), added, evidence))
     return 0
 
 
@@ -145,7 +142,7 @@ def cmd_step(args, j):
     repo = config.load_repo(run["repo"])
     mode, source = run_mode(run)
     engine.record_step(j, repo, run, args.step, args.status, mode, evidence=args.evidence,
-                       note=args.note, by_igor=args.by_igor, mode_source=source)
+                       note=args.note, by_human=args.by_human, mode_source=source)
     print("%s: %s" % (args.step, args.status))
     return 0
 
@@ -159,7 +156,7 @@ def cmd_owe(args, j):
 
 def cmd_clear(args, j):
     run = current_run(j, args)
-    engine.clear_owed(j, run, args.owed_id, by_igor=args.by_igor)
+    engine.clear_owed(j, run, args.owed_id, by_human=args.by_human)
     print("cleared #%d" % args.owed_id)
     return 0
 
@@ -167,7 +164,7 @@ def cmd_clear(args, j):
 def cmd_profile(args, j):
     run = current_run(j, args)
     added, removed = engine.switch_profile(j, config.load_repo(run["repo"]), run, args.name,
-                                           args.by_igor)
+                                           args.by_human)
     print("profile %s -> %s; added: %s; removed: %s" % (run["profile"], args.name,
                                                         ", ".join(added) or "-", ", ".join(removed) or "-"))
     return 0
@@ -211,7 +208,7 @@ def cmd_explain(args, j):
         out += ["run: %s" % run["id"],
                 "profile: %s (%s)" % (run["profile"], run["profile_by"]),
                 "origin: %s" % (run["origin"] or "none"),
-                "stamp: %s" % (origin_stamp(run) or "none"),
+                "origin notes: %s" % (getattr(run_origin(run), "notes", "") or "none"),
                 "mode: %s (%s)" % (mode, source),
                 "steps:"]
         states = j.steps(run["id"])
@@ -259,7 +256,7 @@ def cmd_export(args, j):
 
 
 def own_pr_parser():
-    ap = argparse.ArgumentParser(prog="own-pr", description="Drive Igor's own pull requests.")
+    ap = argparse.ArgumentParser(prog="own-pr", description="Drive your own pull requests.")
     ap.add_argument("--run", help="run id (default: the open run for this checkout)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("start")
@@ -276,7 +273,7 @@ def own_pr_parser():
     p.add_argument("status", choices=("pending", "running", "done", "failed", "skipped", "deferred"))
     p.add_argument("--evidence")
     p.add_argument("--note")
-    p.add_argument("--by-igor", action="store_true")
+    p.add_argument("--by-human", action="store_true")
     p.set_defaults(fn=cmd_step)
     p = sub.add_parser("owe")
     p.add_argument("text")
@@ -284,11 +281,11 @@ def own_pr_parser():
     p.set_defaults(fn=cmd_owe)
     p = sub.add_parser("clear")
     p.add_argument("owed_id", type=int)
-    p.add_argument("--by-igor", action="store_true")
+    p.add_argument("--by-human", action="store_true")
     p.set_defaults(fn=cmd_clear)
     p = sub.add_parser("profile")
     p.add_argument("name")
-    p.add_argument("--by-igor", action="store_true")
+    p.add_argument("--by-human", action="store_true")
     p.set_defaults(fn=cmd_profile)
     p = sub.add_parser("mode")
     p.add_argument("mode", choices=("attended", "away", "clear"))
@@ -310,7 +307,7 @@ def own_pr_parser():
 
 def prs_main(argv):
     from . import overview
-    ap = argparse.ArgumentParser(prog="prs", description="Igor's own PRs in flight.")
+    ap = argparse.ArgumentParser(prog="prs", description="Your own PRs in flight.")
     ap.add_argument("--no-gh", action="store_true", help="do not ask GitHub")
     sub = ap.add_subparsers(dest="cmd")
     sub.add_parser("owed")

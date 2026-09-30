@@ -44,7 +44,7 @@ def test_start_unknown_profile(cfg, checkout, capsys):
 
 def test_start_origin_from_root(cfg, checkout, capsys):
     write(cfg / "origins" / "wso.md",
-          "root: %s\nstamp: 🤖 WS\nprofile.%s: quick\n" % (checkout, REPO))
+          "root: %s\nprofile.%s: quick\n" % (checkout, REPO))
     code, out, _ = own(capsys, "start")
     assert "profile quick (origin)" in out and "origin wso" in out
 
@@ -56,14 +56,14 @@ def test_start_bad_mode_env(cfg, checkout, capsys, monkeypatch):
 
 
 def test_next_prints_step_prose_and_context(cfg, checkout, capsys):
-    write(cfg / "origins" / "wso.md", "root: %s\nstamp: 🤖 WS\n" % checkout)
+    write(cfg / "origins" / "wso.md", "root: %s\n\nStart every Slack post with 🤖 WS.\n" % checkout)
     own(capsys, "start")
     own(capsys, "bind", "https://github.com/pdffiller/jsfiller/pull/13300")
     code, out, _ = own(capsys, "next")
     assert code == 0
     assert out.splitlines()[0] == "NEXT: do pr-draft  (kind=auto, mode=attended)"
     assert "PR: https://github.com/pdffiller/jsfiller/pull/13300" in out
-    assert "Stamp: 🤖 WS" in out
+    assert "Origin wso: Start every Slack post with 🤖 WS." in out
     assert out.rstrip().endswith("Do pr-draft.")
 
 
@@ -97,7 +97,7 @@ def test_owe_and_clear(cfg, checkout, capsys):
     own(capsys, "start")
     own(capsys, "owe", "look at the retry logic")
     owed = cli.open_journal().open_owed()[0]
-    assert own(capsys, "clear", str(owed["id"]), "--by-igor")[0] == 0
+    assert own(capsys, "clear", str(owed["id"]), "--by-human")[0] == 0
     assert cli.open_journal().open_owed() == []
 
 
@@ -142,7 +142,7 @@ def test_close_refuses_running(cfg, checkout, capsys):
 
 def test_profile_switch(cfg, checkout, capsys):
     own(capsys, "start")
-    code, out, _ = own(capsys, "profile", "quick", "--by-igor")
+    code, out, _ = own(capsys, "profile", "quick", "--by-human")
     assert code == 0 and "removed: decomment, deploy-rc" in out
 
 
@@ -183,12 +183,12 @@ def test_no_config_for_repo(cfg, checkout, capsys):
     assert code == 2 and err.startswith("own-pr: no own-pr config for github.com/someone/else")
 
 
-def test_clear_needs_by_igor(cfg, checkout, capsys):
+def test_clear_needs_by_human(cfg, checkout, capsys):
     own(capsys, "start")
     own(capsys, "owe", "look at it")
     owed = cli.open_journal().open_owed()[0]["id"]
     code, _, err = own(capsys, "clear", str(owed))
-    assert code == 2 and "only Igor" in err
+    assert code == 2 and "only the human" in err
     assert cli.open_journal().open_owed()[0]["id"] == owed
 
 
@@ -222,12 +222,12 @@ def test_away_flow_reaches_handoff(cfg, checkout, capsys, monkeypatch):
     assert own(capsys, "step", "team-handoff", "done")[0] == 0
 
 
-def test_human_step_says_wait_for_igor(cfg, checkout, capsys):
+def test_human_step_says_wait(cfg, checkout, capsys):
     own(capsys, "start")
     own(capsys, "step", "pr-draft", "done")
     own(capsys, "step", "decomment", "done")
     code, out, _ = own(capsys, "next")
-    assert out.splitlines()[0] == "NEXT: do eyeball  (kind=human, mode=attended, Igor's step — ask him and wait)"
+    assert out.splitlines()[0] == "NEXT: do eyeball  (kind=human, mode=attended, the human's step — ask them and wait)"
 
 
 def test_handoff_check_is_gone(cfg, checkout, capsys):

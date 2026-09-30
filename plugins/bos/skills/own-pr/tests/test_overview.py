@@ -64,8 +64,9 @@ def test_table(j):
     out = overview.table(j, gh)
     row = next(l for l in out.splitlines() if l.startswith("#13300"))
     for part in ("pdffiller/jsfiller", "fix(rte): stop the spacing", "full", "ci running",
-                 "eyeball", "green", "rc09", "2F400916"):
+                 "eyeball", "green", "2F400916"):
         assert part in row
+    assert "rc09" not in row and "RC" not in out.splitlines()[0]
     other = next(l for l in out.splitlines() if "feature/y" in l)
     assert other.startswith("-")
     assert "Untracked open PRs:" in out
@@ -73,11 +74,12 @@ def test_table(j):
     assert "#13300 pdffiller/jsfiller  t" not in out
 
 
-def test_table_closes_merged_runs(j):
+def test_merged_run_stays_open_until_a_step_closes_it(j):
     rid = start(j, "feature/x", URL)
     out = overview.table(j, fake_gh(pr_state="MERGED"))
-    assert "closed run %s: PR is merged" % rid in out
-    assert j.run(rid)["state"] == "closed"
+    assert j.run(rid)["state"] == "open"
+    row = next(l for l in out.splitlines() if l.startswith("#13300"))
+    assert "merged" in row
 
 
 def test_merged_run_with_running_step_stays_open(j):
@@ -168,18 +170,18 @@ def test_label():
     assert overview.label(engine.Action("reconcile", "ci")) == "ci running"
     assert overview.label(engine.Action("retry", "ci")) == "ci failed"
     assert overview.label(engine.Action("do", "ci")) == "ci next"
-    assert overview.label(engine.Action("do", "eyeball", waits=True)) == "eyeball waits for Igor"
+    assert overview.label(engine.Action("do", "eyeball", waits=True)) == "eyeball waits for the human"
     assert overview.label(engine.Action("done")) == "done"
 
 
 def test_now_reflects_mode(j):
     rid = start(j, "feature/x", URL)
     for s in ("pr-draft", "decomment", "review", "ci", "deploy-rc"):
-        j.set_step(rid, s, "done", by="igor")
+        j.set_step(rid, s, "done", by="human")
 
     def row():
         return next(l for l in overview.table(j, lambda a: None).splitlines() if l.startswith("#13300"))
     j.update_run(rid, mode_run="away")
     assert "team-handoff next" in row()
     j.update_run(rid, mode_run="attended")
-    assert "eyeball waits for Igor" in row()
+    assert "eyeball waits for the human" in row()

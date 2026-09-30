@@ -1,4 +1,4 @@
-"""`prs`: every open run, what it owes Igor, untracked PRs, and jumping to the owning session."""
+"""`prs`: every open run, what it owes the human, untracked PRs, and jumping to the owning session."""
 import json
 import re
 import subprocess
@@ -8,7 +8,7 @@ from . import config, engine
 
 FAILED = ("FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE")
 WAITING = ("", "PENDING", "QUEUED", "IN_PROGRESS", "EXPECTED", "WAITING", "REQUESTED")
-HEADERS = ("PR", "REPO", "TITLE", "PROFILE", "NOW", "OWED", "CI", "RC", "ACTIVE", "SESSION")
+HEADERS = ("PR", "REPO", "TITLE", "PROFILE", "NOW", "OWED", "CI", "ACTIVE", "SESSION")
 
 
 def real_gh(args):
@@ -57,7 +57,7 @@ def label(action):
     if action.kind == "done":
         return "done"
     if action.waits:
-        return "%s waits for Igor" % action.step
+        return "%s waits for the human" % action.step
     return "%s %s" % (action.step, {"reconcile": "running", "retry": "failed"}.get(action.kind, "next"))
 
 
@@ -71,18 +71,11 @@ def render(rows):
 
 
 def table(journal, gh):
-    rows, notes = [HEADERS], []
+    rows = [HEADERS]
     for run in journal.open_runs():
         info = gh(["pr", "view", run["pr_url"], "--json", "state,title,isDraft,statusCheckRollup"]) \
             if run["pr_url"] else None
-        states = journal.steps(run["id"])
         state = (info or {}).get("state")
-        if state in ("MERGED", "CLOSED"):
-            running = [s for s, v in states.items() if v["status"] == "running"]
-            if not running:
-                journal.close_run(run["id"])
-                notes.append("closed run %s: PR is %s" % (run["id"], state.lower()))
-                continue
         try:
             mode, _ = engine.effective_mode(run, config.machine_mode())
             now = label(engine.peek(journal, config.load_repo(run["repo"]), run, mode))
@@ -93,13 +86,11 @@ def table(journal, gh):
         owed = journal.open_owed(run["id"])
         owed_label = ",".join(sorted({o["step"] or "other" for o in owed})) or "-"
         title = ((info or {}).get("title") or run["branch"])[:40]
-        rc = ",".join(c["env"] for c in journal.claims(run["id"])) or "-"
         rows.append(("#%s" % run["pr_number"] if run["pr_number"] else "-",
                      short_repo(run["repo"]), title, run["profile"], now, owed_label,
-                     ci_summary((info or {}).get("statusCheckRollup")), rc, ago(run["updated"]),
+                     ci_summary((info or {}).get("statusCheckRollup")), ago(run["updated"]),
                      (run["agterm_session"] or "-")[:8]))
     out = [render(rows)] if len(rows) > 1 else ["No open own-pr runs."]
-    out += notes
     tracked = {r["pr_url"] for r in journal.open_runs() if r["pr_url"]}
     mine = gh(["search", "prs", "--author=@me", "--state=open", "--limit", "100",
                "--json", "url,title,repository"]) or []

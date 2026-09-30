@@ -40,6 +40,10 @@ through terminal tabs.
 - Reviewing other people's PRs. That is `request-pr-review` / `~/review`, and stays separate.
 - `autonomous-ship` stays for now. It is deleted later, separately.
 
+The engine is neutral: it knows no step, repo, tool or person by name, only `kind`
+(`auto|human`), the modes `attended|away` and the step behaviours `run|defer|auto-pick|wait`.
+The human acts through `--by-human`; names live in step prose.
+
 ## Components
 
 | Part | Lives in | Role |
@@ -62,7 +66,7 @@ lives in the step files.
     repo.md                               requires, default profile
     steps/<id>.md                         repo steps; same id shadows the global one
     profiles/<name>.md                    description + ordered step ids
-  origins/<flow>.md                       stamp, default profile per target repo
+  origins/<flow>.md                       root, default profile per target repo, notes
 ```
 
 All files are Markdown. The CLI parses only a fixed set of `key: value` lines at the top of
@@ -131,14 +135,14 @@ requests go is written in its own step files.
 
 ```markdown
 root: ~/pdfFiller/ws-observability
-stamp: 🤖 [WS Observability Agent](https://github.com/pdffiller/ws-observability)
 profile.github.com/pdffiller/jsfiller: quick
+
+Start every Slack post with 🤖 [WS Observability Agent](https://github.com/pdffiller/ws-observability).
 ```
 
-An origin is the flow the work came from. It may set the Slack stamp and a default profile
-per target repo, and nothing else. Stamps exist only in origin files; there is no global or
-repo default to inherit, so a missing `stamp` key means no stamp. An origin cannot drop or
-replace repo steps.
+An origin is the flow the work came from. It sets a default profile per target repo, and its
+prose (notes) is shown by `own-pr next` next to every step, e.g. a stamp the flow puts on its
+posts. It cannot drop or replace repo steps.
 
 The origin is resolved once, at `own-pr start`, and stored with the run: `--origin` beats
 `OWN_PR_ORIGIN`; otherwise the main worktree root of the directory `own-pr start` runs in
@@ -214,7 +218,8 @@ A run holds:
 Plus an append-only event table.
 
 GitHub is the authority for remote facts (PR state, CI, review state). The journal is the
-authority for local decisions. Status commands reconcile with GitHub; nothing trusts a
+authority for local decisions. `prs` reads PR state from GitHub but never closes a run;
+a configured step closes it (`merge` today). Nothing trusts a
 recorded "green" from earlier.
 
 `ask-review`'s Slack message ts is stored, so a resumed run updates the original thread and
@@ -251,7 +256,7 @@ is recorded as `failed`.
 | `prs go <pr>` | Select the recorded agterm session; report if it no longer exists |
 
 `prs` columns: PR, repo, title, profile, current execution state (e.g. `aqa running`), owed to
-Igor (e.g. `inspection`, `agent's review picks`), CI, rc, last activity, session.
+Igor (e.g. `inspection`, `agent's review picks`), CI, last activity, session.
 
 ## Today's steps (jsfiller)
 
@@ -266,7 +271,7 @@ Igor (e.g. `inspection`, `agent's review picks`), CI, rc, last activity, session
 | `deploy-rc` | auto | run | `own-pr env claim rc09`, then `/deliver pdfFiller/rc/desk09 <branch>`. Already authorised by own-pr; the agent does not ask again |
 | `manual-check` | human | defer | Igor pokes it on rc09 |
 | `aqa` | auto | run | `/aqa <pr> rc/desk09` after `deploy-rc`, so `/aqa` never triggers its own delivery. Records the final result, not the launch |
-| `team-handoff` | auto | run | Mark ready, then `ask-review` (stamp from origin), store the message permalink |
+| `team-handoff` | auto | run | Mark ready, then `ask-review` (following origin notes), store the message permalink |
 | `team-feedback` | auto | run | Until merged or closed: fix team review comments, decomment what the fixes added, updates go to the original Slack thread |
 | `merge` | human | wait | Igor presses merge; the agent records it and closes the run |
 
