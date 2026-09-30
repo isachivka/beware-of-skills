@@ -167,3 +167,12 @@ def test_prs_unwritable_state(cfg, monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("OWN_PR_STATE_DIR", str(blocker / "state"))
     assert cli.main([], prog="prs") == 2
     assert capsys.readouterr().err.startswith("prs: ")
+
+
+def test_merged_run_waiting_on_team_feedback_closes(j):
+    rid = start(j, "feature/x", URL)
+    j.set_step(rid, "team-feedback", "running")
+    out = overview.table(j, fake_gh(pr_state="MERGED"))
+    assert "closed run %s: PR is merged" % rid in out
+    assert j.run(rid)["state"] == "closed"
+    assert j.steps(rid)["team-feedback"]["status"] == "done"

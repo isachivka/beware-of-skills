@@ -135,7 +135,9 @@ def record_step(journal, repo, run, step_id, status, mode, evidence=None, note=N
     journal.set_step(run["id"], step_id, status, evidence, note, by, mode=label)
 
 
-def clear_owed(journal, run, owed_id):
+def clear_owed(journal, run, owed_id, by_igor=False):
+    if not by_igor:
+        raise RuleError("only Igor discharges an owed item; record it with --by-igor once he has looked")
     item = journal.owed(owed_id)
     if item["run_id"] != run["id"]:
         raise RuleError("owed item %s belongs to run %s" % (owed_id, item["run_id"]))
@@ -145,7 +147,9 @@ def clear_owed(journal, run, owed_id):
         journal.set_step(run["id"], step, "done", note="cleared by Igor", by="igor")
 
 
-def waive(journal, repo, run):
+def waive(journal, repo, run, by_igor=False):
+    if not by_igor:
+        raise RuleError("only Igor waives his review; record it with --by-igor once he has said so")
     record_step(journal, repo, run, "eyeball", "skipped", "attended", note="waived by Igor",
                 by_igor=True)
     journal.clear_owed_for_step(run["id"], "eyeball")

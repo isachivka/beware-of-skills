@@ -77,7 +77,7 @@ def test_handoff_blocked_until_clean(env):
     a = engine.next_action(j, repo, run(j, rid), "attended")
     assert (a.kind, a.step) == ("blocked", "team-handoff")
     assert a.blockers == ["owed to Igor: review decided by the agent: x"]
-    engine.clear_owed(j, run(j, rid), owed)
+    engine.clear_owed(j, run(j, rid), owed, by_igor=True)
     a = engine.next_action(j, repo, run(j, rid), "attended")
     assert (a.kind, a.step) == ("do", "team-handoff")
 
@@ -127,7 +127,7 @@ def test_clearing_deferred_item_completes_the_step(env):
     finish(j, rid, "pr-draft", "decomment")
     engine.next_action(j, repo, run(j, rid), "away")
     owed = j.open_owed(rid)[0]["id"]
-    engine.clear_owed(j, run(j, rid), owed)
+    engine.clear_owed(j, run(j, rid), owed, by_igor=True)
     eyeball = j.steps(rid)["eyeball"]
     assert (eyeball["status"], eyeball["by"]) == ("done", "igor")
 
@@ -147,7 +147,7 @@ def test_step_outside_profile(env):
 def test_waive(env):
     j, repo, rid = env
     j.add_owed(rid, "eyeball deferred", step="eyeball")
-    engine.waive(j, repo, run(j, rid))
+    engine.waive(j, repo, run(j, rid), by_igor=True)
     eyeball = j.steps(rid)["eyeball"]
     assert (eyeball["status"], eyeball["by"], eyeball["note"]) == ("skipped", "igor", "waived by Igor")
     assert j.open_owed(rid) == []

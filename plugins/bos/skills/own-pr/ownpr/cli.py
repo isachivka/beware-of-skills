@@ -17,7 +17,7 @@ class Fail(Exception):
 
 
 ERRORS = (config.ConfigError, context.ContextError, JournalError, engine.RuleError, Fail,
-          OSError, sqlite3.Error)
+          OSError, sqlite3.Error, UnicodeError)
 
 
 def open_journal():
@@ -157,14 +157,14 @@ def cmd_owe(args, j):
 
 def cmd_clear(args, j):
     run = current_run(j, args)
-    engine.clear_owed(j, run, args.owed_id)
+    engine.clear_owed(j, run, args.owed_id, by_igor=args.by_igor)
     print("cleared #%d" % args.owed_id)
     return 0
 
 
 def cmd_waive(args, j):
     run = current_run(j, args)
-    engine.waive(j, config.load_repo(run["repo"]), run)
+    engine.waive(j, config.load_repo(run["repo"]), run, by_igor=args.by_igor)
     print("eyeball waived by Igor")
     return 0
 
@@ -299,8 +299,11 @@ def own_pr_parser():
     p.set_defaults(fn=cmd_owe)
     p = sub.add_parser("clear")
     p.add_argument("owed_id", type=int)
+    p.add_argument("--by-igor", action="store_true")
     p.set_defaults(fn=cmd_clear)
-    sub.add_parser("waive").set_defaults(fn=cmd_waive)
+    p = sub.add_parser("waive")
+    p.add_argument("--by-igor", action="store_true")
+    p.set_defaults(fn=cmd_waive)
     sub.add_parser("handoff-check").set_defaults(fn=cmd_handoff_check)
     p = sub.add_parser("profile")
     p.add_argument("name")

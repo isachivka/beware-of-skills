@@ -48,9 +48,10 @@ Once the PR exists: `own-pr bind <pr-url>`.
 
 Record these only when Igor said them in this session:
 - Skip a step: `own-pr step <id> skipped --by-igor --note "<his reason>"`.
-- "Waive my review": `own-pr waive`.
+- "Waive my review": `own-pr waive --by-igor`.
 - "I'm away" / "I'm back" for this PR: `own-pr mode away|attended` (`clear` drops the override).
-- He has looked at something owed: `own-pr clear <id>` (ids in `prs owed`).
+- He has looked at something owed: `own-pr clear <id> --by-igor` (ids in `prs owed`). Fixing
+  what an owed item describes does not clear it; only Igor looking does.
 - Another profile: `own-pr profile NAME --by-igor`. Switching on your own (no `--by-igor`) is
   allowed, but dropping steps that way is owed to him.
 

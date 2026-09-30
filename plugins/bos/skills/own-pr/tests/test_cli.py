@@ -118,13 +118,13 @@ def test_owe_and_clear(cfg, checkout, capsys):
     own(capsys, "start")
     own(capsys, "owe", "look at the retry logic")
     owed = cli.open_journal().open_owed()[0]
-    assert own(capsys, "clear", str(owed["id"]))[0] == 0
+    assert own(capsys, "clear", str(owed["id"]), "--by-igor")[0] == 0
     assert cli.open_journal().open_owed() == []
 
 
 def test_waive(cfg, checkout, capsys):
     own(capsys, "start")
-    assert own(capsys, "waive")[0] == 0
+    assert own(capsys, "waive", "--by-igor")[0] == 0
     run = cli.open_journal().open_runs()[0]
     assert cli.open_journal().steps(run["id"])["eyeball"]["status"] == "skipped"
 
@@ -207,3 +207,20 @@ def test_no_config_for_repo(cfg, checkout, capsys):
     git(checkout, "remote", "set-url", "origin", "git@github.com:someone/else.git")
     code, _, err = own(capsys, "start")
     assert code == 2 and err.startswith("own-pr: no own-pr config for github.com/someone/else")
+
+
+def test_clear_and_waive_need_by_igor(cfg, checkout, capsys):
+    own(capsys, "start")
+    own(capsys, "owe", "look at it")
+    owed = cli.open_journal().open_owed()[0]["id"]
+    code, _, err = own(capsys, "clear", str(owed))
+    assert code == 2 and "only Igor" in err
+    code, _, err = own(capsys, "waive")
+    assert code == 2 and "only Igor" in err
+    assert cli.open_journal().open_owed()[0]["id"] == owed
+
+
+def test_non_utf8_config_is_an_error_not_a_traceback(cfg, checkout, capsys):
+    (cfg / "steps" / "ci.md").write_bytes(b"kind: auto\naway: run\n\n\xff\n")
+    code, _, err = own(capsys, "explain")
+    assert code == 2 and err.startswith("own-pr: ")
