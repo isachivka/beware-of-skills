@@ -69,11 +69,12 @@ def cmd_start(args, j):
     mode_env = os.environ.get("OWN_PR_MODE") or None
     if mode_env and mode_env not in config.MODES:
         raise Fail("OWN_PR_MODE must be attended or away, got %r" % mode_env)
-    run_id = j.create_run(co["repo"], co["branch"], co["toplevel"], profile, by,
-                          repo.profiles[profile].steps, origin=origin.name if origin else None,
-                          mode_env=mode_env, identity=context.identity(os.environ))
-    if by == "agent":
-        j.add_owed(run_id, "profile %s chosen by the agent: %s" % (profile, args.auto_reason))
+    with j.tx():
+        run_id = j.create_run(co["repo"], co["branch"], co["toplevel"], profile, by,
+                              repo.profiles[profile].steps, origin=origin.name if origin else None,
+                              mode_env=mode_env, identity=context.identity(os.environ))
+        if by == "agent":
+            j.add_owed(run_id, "profile %s chosen by the agent: %s" % (profile, args.auto_reason))
     print("run %s: %s %s, profile %s (%s), origin %s"
           % (run_id, co["repo"], co["branch"], profile, by, origin.name if origin else "none"))
     return 0
@@ -87,7 +88,8 @@ def cmd_bind(args, j):
     repo_id = "%s/%s" % (m.group(1), m.group(2))
     if repo_id != run["repo"]:
         raise Fail("%s belongs to %s, but this run is for %s" % (args.url, repo_id, run["repo"]))
-    j.update_run(run["id"], pr_url=args.url.strip(), pr_number=int(m.group(3)))
+    url = "https://%s/%s/pull/%s" % (m.group(1), m.group(2), m.group(3))
+    j.update_run(run["id"], pr_url=url, pr_number=int(m.group(3)))
     print("run %s bound to %s" % (run["id"], args.url))
     return 0
 
@@ -212,7 +214,12 @@ def cmd_explain(args, j):
                 "mode: %s (%s)" % (mode, source),
                 "steps:"]
         states = j.steps(run["id"])
-        for sid in engine.profile_steps(repo, run):
+        try:
+            order = engine.profile_steps(repo, run)
+        except engine.RuleError:
+            print("\n".join(out))
+            raise
+        for sid in order:
             step, state = repo.steps[sid], states.get(sid, {})
             line = "  %s  kind=%s away=%s  status=%s  (%s)" % (sid, step.kind, step.away,
                                                               state.get("status", "pending"), step.source)
@@ -255,63 +262,130 @@ def cmd_export(args, j):
     return 0
 
 
+OWN_PR_EPILOG = """\
+how it works:
+  The process lives in ~/.config/own-pr (or $OWN_PR_CONFIG_DIR) as Markdown: a step library,
+  per-repo profiles (ordered step lists) and origins (the flows work comes from). The agent
+  that did the work drives the PR in its own session:
+
+    own-pr start                     once per branch; picks the profile
+    own-pr next                      what to do now, with that step's instructions
+    own-pr step <id> done|failed     record what actually happened; repeat `next`
+
+  Steps are `auto` (the agent does them) or `human` (the human does them). In `away` mode
+  every step runs except human ones: those are deferred or decided by the agent and pile up
+  as owed items, and steps marked `away: wait` stop the pipeline until the human is back.
+
+  State: ~/.local/state/own-pr/own-pr.db (or $OWN_PR_STATE_DIR). Overview: `prs`.
+
+examples:
+  own-pr start --profile quick
+  own-pr step ci running
+  own-pr step ci done --evidence https://github.com/o/r/actions/runs/1
+  own-pr step manual-check skipped --by-human --note "no UI change"
+  own-pr away                        leaving: defer human steps on every PR
+"""
+
+STEP_HELP = """\
+Record the outcome of a step of this run's profile.
+
+statuses:
+  pending   must run (again); forgets the old evidence. Use it to re-queue a finished step.
+  running   started and not finished yet: long waits, deploys, test runs. `next` will ask
+            you to reconcile it if the session stops.
+  done      finished and verified. A human step needs --by-human, except an agent-made
+            decision in away mode (needs --note; becomes owed to the human).
+  failed    tried and did not work; `next` sends you back to retry it.
+  skipped   the human decided not to do it: needs --by-human and --note with their reason.
+            Steps the repo requires cannot be skipped.
+"""
+
+
 def own_pr_parser():
-    ap = argparse.ArgumentParser(prog="own-pr", description="Drive your own pull requests.")
-    ap.add_argument("--run", help="run id (default: the open run for this checkout)")
-    sub = ap.add_subparsers(dest="cmd", required=True)
-    p = sub.add_parser("start")
-    p.add_argument("--profile")
-    p.add_argument("--auto-reason")
-    p.add_argument("--origin")
-    p.set_defaults(fn=cmd_start)
-    p = sub.add_parser("bind")
-    p.add_argument("url")
-    p.set_defaults(fn=cmd_bind)
-    sub.add_parser("next").set_defaults(fn=cmd_next)
-    p = sub.add_parser("step")
-    p.add_argument("step")
-    p.add_argument("status", choices=("pending", "running", "done", "failed", "skipped", "deferred"))
-    p.add_argument("--evidence")
-    p.add_argument("--note")
-    p.add_argument("--by-human", action="store_true")
-    p.set_defaults(fn=cmd_step)
-    p = sub.add_parser("owe")
+    raw = argparse.RawDescriptionHelpFormatter
+    ap = argparse.ArgumentParser(
+        prog="own-pr", formatter_class=raw, epilog=OWN_PR_EPILOG,
+        description="Drive your own pull request through a process defined as text.")
+    ap.add_argument("--run", metavar="ID",
+                    help="act on this run instead of the open run for the current checkout")
+    sub = ap.add_subparsers(dest="cmd", required=True, metavar="<command>")
+
+    def cmd(name, fn, summary, description=None):
+        p = sub.add_parser(name, help=summary, description=description or summary,
+                           formatter_class=raw)
+        p.set_defaults(fn=fn)
+        return p
+
+    p = cmd("start", cmd_start, "create a run for this checkout and pick its profile",
+            "Create a run for the current checkout's repo and branch. The profile comes from\n"
+            "--profile, else the origin's profile for this repo, else repo.md `default`. With\n"
+            "`default: auto` the list of profiles is printed: choose one and pass it again.")
+    p.add_argument("--profile", metavar="NAME", help="profile to use (named by the human or the calling flow)")
+    p.add_argument("--auto-reason", metavar="WHY",
+                   help="the agent picked --profile itself: why (becomes owed to the human)")
+    p.add_argument("--origin", metavar="NAME",
+                   help="flow the work came from (default: $OWN_PR_ORIGIN, else matched by `root:`)")
+    p = cmd("bind", cmd_bind, "attach the pull request to the run")
+    p.add_argument("url", help="https://<host>/<owner>/<repo>/pull/<N>; must be this run's repo")
+    cmd("next", cmd_next, "print the next action and that step's instructions",
+        "Print NEXT: <action> <step>, the PR, origin notes, and the step's prose.\n"
+        "actions: do (run it), retry (it failed), reconcile (it was running when the session\n"
+        "stopped: find out how it ended), done (profile finished). In away mode `next` itself\n"
+        "defers human steps that allow it.")
+    p = cmd("step", cmd_step, "record a step's outcome: pending|running|done|failed|skipped", STEP_HELP)
+    p.add_argument("step", help="step id, as listed by `own-pr explain`")
+    p.add_argument("status", choices=("pending", "running", "done", "failed", "skipped"))
+    p.add_argument("--evidence", metavar="URL", help="link proving it: PR, CI run, deploy, Slack post")
+    p.add_argument("--note", metavar="TEXT", help="what happened; required for skips and agent decisions")
+    p.add_argument("--by-human", action="store_true",
+                   help="the human did or decided this, in this session")
+    p = cmd("owe", cmd_owe, "add something the human should look at (shown in `prs owed`)")
     p.add_argument("text")
-    p.add_argument("--step")
-    p.set_defaults(fn=cmd_owe)
-    p = sub.add_parser("clear")
-    p.add_argument("owed_id", type=int)
-    p.add_argument("--by-human", action="store_true")
-    p.set_defaults(fn=cmd_clear)
-    p = sub.add_parser("profile")
+    p.add_argument("--step", metavar="ID", help="step it belongs to; done --by-human on that step clears it")
+    p = cmd("clear", cmd_clear, "the human has looked at an owed item",
+            "Discharge an owed item. Only the human does this: fixing what the item\n"
+            "describes does not clear it. Ids are listed by `prs owed`.")
+    p.add_argument("owed_id", type=int, metavar="ID")
+    p.add_argument("--by-human", action="store_true", help="required: the human looked at it")
+    p = cmd("profile", cmd_profile, "switch this run to another profile",
+            "Switch profile; prints added and removed steps. Owed items and claims survive.\n"
+            "Without --by-human, dropping steps becomes owed to the human.")
     p.add_argument("name")
-    p.add_argument("--by-human", action="store_true")
-    p.set_defaults(fn=cmd_profile)
-    p = sub.add_parser("mode")
+    p.add_argument("--by-human", action="store_true", help="the human asked for this profile")
+    p = cmd("mode", cmd_mode, "set this run's mode (the human's decision in this session)",
+            "Override the mode for this run only: attended, away, or clear to follow the\n"
+            "terminal ($OWN_PR_MODE at start) and machine mode again.")
     p.add_argument("mode", choices=("attended", "away", "clear"))
-    p.set_defaults(fn=cmd_mode)
-    sub.add_parser("away").set_defaults(fn=cmd_machine)
-    sub.add_parser("attended").set_defaults(fn=cmd_machine)
-    sub.add_parser("explain").set_defaults(fn=cmd_explain)
-    p = sub.add_parser("env")
+    cmd("away", cmd_machine, "machine mode: defer human steps on every run",
+        "Set the machine-wide mode to away. Runs with a terminal or run override keep theirs;\n"
+        "they are listed.")
+    cmd("attended", cmd_machine, "machine mode: human steps wait for the human again")
+    cmd("explain", cmd_explain, "show the resolved steps and settings with their source files")
+    p = cmd("env", cmd_env, "claim or release a shared resource for this run",
+            "A claim fails while another open run holds the resource. Closing the run\n"
+            "releases its claims.")
     p.add_argument("action", choices=("claim", "release"))
-    p.add_argument("env")
-    p.set_defaults(fn=cmd_env)
-    p = sub.add_parser("adopt")
-    p.add_argument("target")
-    p.set_defaults(fn=cmd_adopt)
-    sub.add_parser("close").set_defaults(fn=cmd_close)
-    sub.add_parser("export").set_defaults(fn=cmd_export)
+    p.add_argument("env", metavar="NAME", help="resource name, as the step prose uses it")
+    p = cmd("adopt", cmd_adopt, "make this session the owner of a run another session started")
+    p.add_argument("target", metavar="RUN", help="run id, as shown by `prs`")
+    cmd("close", cmd_close, "end the run (refused while a step is running)")
+    cmd("export", cmd_export, "print the whole journal as JSON")
     return ap
 
 
 def prs_main(argv):
     from . import overview
-    ap = argparse.ArgumentParser(prog="prs", description="Your own PRs in flight.")
-    ap.add_argument("--no-gh", action="store_true", help="do not ask GitHub")
-    sub = ap.add_subparsers(dest="cmd")
-    sub.add_parser("owed")
-    p = sub.add_parser("go")
+    ap = argparse.ArgumentParser(
+        prog="prs", formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Your own PRs in flight: one row per open own-pr run (PR, profile, what it is\n"
+                    "doing now, what it owes the human, CI, last activity, owning terminal), then\n"
+                    "your open PRs that no run tracks.",
+        epilog="examples:\n  prs\n  prs owed\n  prs go 13300                 by number, if it is unique\n"
+               "  prs go owner/repo#N          when two repos share a number\n")
+    ap.add_argument("--no-gh", action="store_true", help="do not ask GitHub (offline, faster)")
+    sub = ap.add_subparsers(dest="cmd", metavar="<command>")
+    sub.add_parser("owed", help="everything waiting on the human, with ids for `own-pr clear`")
+    p = sub.add_parser("go", help="switch to the agterm session that owns a PR")
     p.add_argument("pr", help="N, #N, owner/repo#N, PR url or run id")
     args = ap.parse_args(argv)
     try:

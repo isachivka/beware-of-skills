@@ -281,3 +281,14 @@ def test_failed_step_before_handoff_is_retried_first(env):
     finish(j, rid, "pr-draft", "decomment", "eyeball", "review", "deploy-rc")
     j.set_step(rid, "ci", "failed")
     assert (engine.next_action(j, repo, run(j, rid), "away").kind) == "retry"
+
+
+def test_agent_decision_and_its_debt_are_one_write(env, monkeypatch):
+    j, repo, rid = env
+
+    def boom(*a, **k):
+        raise RuntimeError("lock timeout")
+    monkeypatch.setattr(j, "add_owed", boom)
+    with pytest.raises(RuntimeError):
+        engine.record_step(j, repo, run(j, rid), "review", "done", "away", note="took 1")
+    assert j.steps(rid)["review"]["status"] == "pending"

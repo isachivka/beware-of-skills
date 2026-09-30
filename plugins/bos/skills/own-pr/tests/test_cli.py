@@ -234,3 +234,58 @@ def test_handoff_check_is_gone(cfg, checkout, capsys):
     own(capsys, "start")
     with pytest.raises(SystemExit):
         cli.main(["handoff-check"])
+
+
+def test_bind_normalises_the_url(cfg, checkout, capsys):
+    own(capsys, "start")
+    own(capsys, "bind", "https://github.com/pdffiller/jsfiller/pull/7/")
+    assert cli.open_journal().open_runs()[0]["pr_url"] == "https://github.com/pdffiller/jsfiller/pull/7"
+
+
+def test_explain_shows_what_it_can_when_the_profile_breaks(cfg, checkout, capsys):
+    own(capsys, "start")
+    write(repo_dir(cfg) / "repo.md", "requires: review, ci\ndefault: quick\n")
+    write(repo_dir(cfg) / "profiles" / "full.md", "description: d\nsteps: pr-draft, nope\n")
+    code, out, err = own(capsys, "explain")
+    assert code == 2
+    assert "repo: github.com/pdffiller/jsfiller" in out and "invalid profile full" in out
+    assert "not usable" in err
+
+
+COMMANDS = ("start", "bind", "next", "step", "owe", "clear", "profile", "mode", "away", "attended",
+            "explain", "env", "adopt", "close", "export")
+
+
+def test_help_documents_every_command(capsys):
+    import re
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+    out = capsys.readouterr().out
+    for cmd in COMMANDS:
+        assert re.search(r"^\s+%s\s+\S" % cmd, out, re.M), cmd
+    assert "own-pr start" in out and "own-pr next" in out and "prs" in out
+
+
+@pytest.mark.parametrize("cmd", COMMANDS)
+def test_each_command_has_a_description(cmd, capsys):
+    with pytest.raises(SystemExit):
+        cli.main([cmd, "--help"])
+    usage, _, rest = capsys.readouterr().out.partition("\n\n")
+    assert rest.strip() and not rest.lstrip().startswith(("positional", "options")), cmd
+
+
+def test_step_help_explains_statuses(capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["step", "--help"])
+    out = capsys.readouterr().out
+    for word in ("pending", "running", "done", "failed", "skipped", "--by-human", "--evidence", "--note"):
+        assert word in out
+    assert "deferred" not in out
+
+
+def test_prs_help(capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["--help"], prog="prs")
+    out = capsys.readouterr().out
+    for word in ("owed", "go", "--no-gh", "owner/repo#N"):
+        assert word in out

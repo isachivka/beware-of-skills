@@ -1,6 +1,6 @@
 # own-pr: one lifecycle for Igor's own pull requests
 
-Status: design agreed 2026-09-30 (Igor, Claude, Codex). Not implemented.
+Status: alpha. Design agreed 2026-09-30 (Igor, Claude, Codex); implemented on branch feat/own-pr.
 
 ## Problem
 
@@ -70,13 +70,14 @@ lives in the step files.
 ```
 
 All files are Markdown. The CLI parses only a fixed set of `key: value` lines at the top of
-each file. Everything else is prose for the agent. Unknown keys are errors.
+each file; values are literal (no inline comments). `kind` is `auto|human`; `away` is `run` for
+auto steps and `defer|auto-pick|wait` for human ones; `default` is `auto` or a profile name. Everything else is prose for the agent. Unknown keys are errors.
 
 ### Step file
 
 ```markdown
-kind: human            # auto | human
-away: defer            # auto: run | human: defer | auto-pick | wait
+kind: human
+away: defer
 
 Igor reads the diff, asks questions, criticises. ...
 ```
@@ -125,7 +126,7 @@ human step does not discharge anything already owed for it.
 
 ```markdown
 requires: review, ci
-default: auto                     # auto | <profile name>
+default: auto
 ```
 
 The repo owns its requirements: which steps are mandatory. How it deploys and where review

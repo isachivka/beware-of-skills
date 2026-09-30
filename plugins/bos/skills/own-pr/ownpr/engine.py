@@ -77,9 +77,10 @@ def next_action(journal, repo, run, mode, mode_source=None):
     for sid in order[:stop]:
         step = repo.steps[sid]
         if states[sid]["status"] == "pending" and step.kind == "human" and step.away == "defer":
-            journal.set_step(run["id"], sid, "deferred", note="deferred while away", by="agent",
-                             mode=mode_label(mode, mode_source))
-            journal.add_owed(run["id"], "%s deferred while you were away" % sid, step=sid)
+            with journal.tx():
+                journal.set_step(run["id"], sid, "deferred", note="deferred while away", by="agent",
+                                 mode=mode_label(mode, mode_source))
+                journal.add_owed(run["id"], "%s deferred while you were away" % sid, step=sid)
     return action
 
 
@@ -110,8 +111,9 @@ def record_step(journal, repo, run, step_id, status, mode, evidence=None, note=N
         if step.away == "auto-pick" and mode == "away":
             if not note:
                 raise RuleError("an agent-made decision needs --note with what was chosen and why")
-            journal.set_step(run["id"], step_id, "done", evidence, note, by, mode=label)
-            journal.add_owed(run["id"], "%s decided by the agent: %s" % (step_id, note), step=step_id)
+            with journal.tx():
+                journal.set_step(run["id"], step_id, "done", evidence, note, by, mode=label)
+                journal.add_owed(run["id"], "%s decided by the agent: %s" % (step_id, note), step=step_id)
             return
         raise RuleError("%s is the human's step; record done with --by-human once they have done it" % step_id)
     journal.set_step(run["id"], step_id, status, evidence, note, by, mode=label)
@@ -123,10 +125,11 @@ def clear_owed(journal, run, owed_id, by_human=False):
     item = journal.owed(owed_id)
     if item["run_id"] != run["id"]:
         raise RuleError("owed item %s belongs to run %s" % (owed_id, item["run_id"]))
-    journal.clear_owed(owed_id)
-    step = item["step"]
-    if step and journal.steps(run["id"]).get(step, {}).get("status") == "deferred":
-        journal.set_step(run["id"], step, "done", note="cleared by the human", by="human")
+    with journal.tx():
+        journal.clear_owed(owed_id)
+        step = item["step"]
+        if step and journal.steps(run["id"]).get(step, {}).get("status") == "deferred":
+            journal.set_step(run["id"], step, "done", note="cleared by the human", by="human")
 
 
 def switch_profile(journal, repo, run, name, by_human):
@@ -140,11 +143,12 @@ def switch_profile(journal, repo, run, name, by_human):
     new = repo.profiles[name].steps
     added = [s for s in new if s not in old]
     removed = [s for s in old if s not in new]
-    journal.ensure_steps(run["id"], new)
-    journal.update_run(run["id"], profile=name, profile_by="explicit" if by_human else "agent")
-    if removed and not by_human:
-        journal.add_owed(run["id"], "agent switched profile %s -> %s, dropping %s"
-                         % (run["profile"], name, ", ".join(removed)))
+    with journal.tx():
+        journal.ensure_steps(run["id"], new)
+        journal.update_run(run["id"], profile=name, profile_by="explicit" if by_human else "agent")
+        if removed and not by_human:
+            journal.add_owed(run["id"], "agent switched profile %s -> %s, dropping %s"
+                             % (run["profile"], name, ", ".join(removed)))
     return added, removed
 
 

@@ -120,3 +120,31 @@ def test_export(j):
     assert set(run["steps"]) == set(STEPS)
     assert run["owed"][0]["text"] == "x"
     assert any(e["kind"] == "start" for e in run["events"])
+
+
+def _add_owed_many(path, run_id, n):
+    j = Journal(path)
+    for i in range(n):
+        j.add_owed(run_id, "item %d" % i)
+
+
+def test_concurrent_writers(tmp_path):
+    import multiprocessing
+    path = str(tmp_path / "state" / "own-pr.db")
+    rid = new_run(Journal(path))
+    procs = [multiprocessing.Process(target=_add_owed_many, args=(path, rid, 25)) for _ in range(4)]
+    for p in procs:
+        p.start()
+    for p in procs:
+        p.join(30)
+    assert [p.exitcode for p in procs] == [0, 0, 0, 0]
+    assert len(Journal(path).open_owed(rid)) == 100
+
+
+def test_nested_tx_rolls_back_together(j):
+    rid = new_run(j)
+    with pytest.raises(RuntimeError):
+        with j.tx():
+            j.set_step(rid, "ci", "done")
+            raise RuntimeError("boom")
+    assert j.steps(rid)["ci"]["status"] == "pending"

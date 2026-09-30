@@ -5,6 +5,9 @@ description: Drive one of the user's own pull requests from "the work is done" t
 
 # own-pr
 
+> Alpha: the CLI and config format may still change. If a command's usage differs from this
+> file, `own-pr --help` and `own-pr <command> --help` are the truth.
+
 You drive this PR through the user's current process. The process is not written here: it
 lives in `~/.config/own-pr/` (or `$OWN_PR_CONFIG_DIR`) and changes often. `own-pr next` hands
 you one step at a time together with that step's instructions. Follow them.

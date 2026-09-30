@@ -4,7 +4,6 @@ import re
 from dataclasses import dataclass
 
 KEY_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_./-]*):[ \t]*(.*)$")
-COMMENT_RE = re.compile(r"\s+#.*$")
 STEP_KEYS = {"kind": ("auto", "human"), "away": ("run", "defer", "auto-pick", "wait")}
 AWAY_BY_KIND = {"auto": ("run",), "human": ("defer", "auto-pick", "wait")}
 MODES = ("attended", "away")
@@ -34,7 +33,7 @@ def read_md(path):
         key = m.group(1)
         if key in keys:
             raise ConfigError("%s: duplicate key %r" % (path, key))
-        keys[key] = COMMENT_RE.sub("", m.group(2)).strip()
+        keys[key] = m.group(2).strip()
         i += 1
     return keys, "\n".join(lines[i:]).strip()
 

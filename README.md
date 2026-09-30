@@ -17,7 +17,7 @@ and Codex CLI.
 | [memory-review](#memory-review)   | Turn an agent's memory pile into one annotatable document, apply your verdicts safely       |
 | [revdiff-ru](#revdiff-ru)         | Code review with everything but the code translated to Russian, line numbers intact         |
 | [decomment](#decomment)           | Strip the comments an agent left that just restate the code                                 |
-| [own-pr](#own-pr)                 | Drive your own PR to merge in the session that wrote it, with a process you edit as text     |
+| [own-pr](#own-pr)                 | **alpha** — drive your own PR in the session that wrote it, by a process you edit as text     |
 
 Requirements vary by skill and are listed per skill below; the agterm ones need
 [agterm](https://github.com/umputun/agterm) on macOS, the review ones need
@@ -241,6 +241,8 @@ kept, which is where you correct its taste.
 line".
 
 ### own-pr
+
+> **Alpha.** The CLI, config format and journal schema may still change without migration.
 
 Every agent flow that opens a pull request ends up inventing its own "what now": draft or
 ready, when to review, who to ping. own-pr takes that tail away from all of them. The session

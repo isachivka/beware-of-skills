@@ -44,6 +44,11 @@ class Journal:
 
     @contextlib.contextmanager
     def tx(self):
+        """One write transaction; nested calls join the outer one, so a caller can make several
+        journal writes atomic."""
+        if self.db.in_transaction:
+            yield
+            return
         self.db.execute("BEGIN IMMEDIATE")
         try:
             yield

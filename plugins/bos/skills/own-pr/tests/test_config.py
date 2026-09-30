@@ -12,9 +12,10 @@ def test_step_header_and_body(cfg):
     assert step.source.endswith("steps/eyeball.md")
 
 
-def test_inline_comment_stripped(cfg):
-    write(cfg / "steps" / "ci.md", "kind: auto   # auto | human\naway: run\n\nWait.\n")
-    assert config.load_repo(REPO).steps["ci"].kind == "auto"
+def test_values_are_literal_no_inline_comments(cfg):
+    write(repo_dir(cfg) / "profiles" / "full.md",
+          "description: fixes like PR #123 # and more\nsteps: pr-draft, eyeball, review, ci\n")
+    assert config.load_repo(REPO).profiles["full"].description == "fixes like PR #123 # and more"
 
 
 def test_prose_line_inside_header_is_an_error(cfg):
