@@ -181,12 +181,14 @@ def load_origins(root=None):
     origins, roots = {}, {}
     for path in md_files(os.path.join(root, "origins")):
         keys, notes = read_md(path)
-        check_keys(keys, ("root", "profile."), ("root",), path)
+        check_keys(keys, ("root", "profile."), (), path)
         name = stem(path)
-        oroot = os.path.realpath(os.path.expanduser(keys["root"]))
-        if oroot in roots:
+        # without a root an origin is only ever chosen explicitly (--origin / OWN_PR_ORIGIN)
+        oroot = os.path.realpath(os.path.expanduser(keys["root"])) if keys.get("root") else None
+        if oroot and oroot in roots:
             raise ConfigError("origins %r and %r share root %s" % (roots[oroot], name, oroot))
-        roots[oroot] = name
+        if oroot:
+            roots[oroot] = name
         profiles = {k[len("profile."):]: v for k, v in keys.items() if k.startswith("profile.")}
         origins[name] = Origin(name, oroot, notes, profiles, path)
     return origins

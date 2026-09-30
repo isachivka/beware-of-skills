@@ -70,3 +70,9 @@ def test_resolve_origin_precedence():
 def test_resolve_unknown_origin():
     with pytest.raises(context.ContextError, match="unknown origin 'nope'"):
         context.resolve_origin(origins(), "nope", None, "/r/wso")
+
+
+def test_origin_without_root_is_only_explicit():
+    both = dict(origins(), tw=config.Origin("tw", None, "", {}, "z"))
+    assert context.resolve_origin(both, "tw", None, "/r/wso").name == "tw"
+    assert context.resolve_origin(both, None, None, "/elsewhere") is None

@@ -147,3 +147,9 @@ def test_origin_stamp_key_is_gone(cfg, tmp_path):
     write(cfg / "origins" / "a.md", "root: %s\nstamp: x\n" % tmp_path)
     with pytest.raises(config.ConfigError, match="unknown key 'stamp'"):
         config.load_origins()
+
+
+def test_origin_without_root(cfg):
+    write(cfg / "origins" / "typing-wave.md", "profile.%s: quick\n\nLogic must not change.\n" % REPO)
+    o = config.load_origins()["typing-wave"]
+    assert o.root is None and o.notes == "Logic must not change."

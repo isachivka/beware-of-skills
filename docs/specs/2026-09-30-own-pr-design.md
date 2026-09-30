@@ -149,7 +149,8 @@ The origin is resolved once, at `own-pr start`, and stored with the run: `--orig
 `OWN_PR_ORIGIN`; otherwise the main worktree root of the directory `own-pr start` runs in
 (`git rev-parse --git-common-dir`, so a linked worktree resolves to its repo) is matched
 against the `root:` of every origin file; otherwise none. Two origins with the same root is a
-config error. An explicitly named origin that has no file is an error. Later `cd`, worktree
+config error. An origin without `root:` is only ever chosen explicitly (a flow that shares its
+repo with other work, e.g. typing waves in jsfiller). An explicitly named origin that has no file is an error. Later `cd`, worktree
 changes or `adopt` never change a stored origin.
 
 ## Profile selection
