@@ -54,7 +54,7 @@ def test_next_prints_step_prose_and_context(cfg, checkout, capsys):
     own(capsys, "bind", "https://github.com/pdffiller/jsfiller/pull/13300")
     code, out, _ = own(capsys, "next")
     assert code == 0
-    assert out.splitlines()[0] == "NEXT: do pr-draft  (kind=auto, mode=attended)"
+    assert out.splitlines()[1] == "NEXT: do pr-draft  (kind=auto, mode=attended)"
     assert "PR: https://github.com/pdffiller/jsfiller/pull/13300" in out
     assert "Origin wso: Start every Slack post with 🤖 WS." in out
     assert out.rstrip().endswith("Do pr-draft.")
@@ -212,7 +212,7 @@ def test_away_flow_reaches_handoff(cfg, checkout, capsys, monkeypatch):
     own(capsys, "step", "ci", "done")
     own(capsys, "step", "deploy-rc", "done")
     code, out, _ = own(capsys, "next")
-    assert out.splitlines()[0] == "NEXT: do team-handoff  (kind=auto, mode=away)"
+    assert out.splitlines()[1] == "NEXT: do team-handoff  (kind=auto, mode=away)"
     assert own(capsys, "step", "team-handoff", "done")[0] == 0
 
 
@@ -221,7 +221,7 @@ def test_human_step_says_wait(cfg, checkout, capsys):
     own(capsys, "step", "pr-draft", "done")
     own(capsys, "step", "decomment", "done")
     code, out, _ = own(capsys, "next")
-    assert out.splitlines()[0] == "NEXT: do eyeball  (kind=human, mode=attended, the human's step — ask them and wait)"
+    assert out.splitlines()[1] == "NEXT: do eyeball  (kind=human, mode=attended, the human's step — ask them and wait)"
 
 
 def test_handoff_check_is_gone(cfg, checkout, capsys):
@@ -380,3 +380,71 @@ def test_detach_needs_notify(cfg, checkout, capsys, monkeypatch):
     bound_run(capsys, monkeypatch)
     code, _, err = own(capsys, "watch", "--detach")
     assert code == 2 and "--notify" in err
+
+
+def test_start_and_next_print_the_plan(cfg, checkout, capsys):
+    code, out, _ = own(capsys, "start", "--profile", "full")
+    assert "PLAN full: ▶pr-draft · decomment · eyeball[you]" in out
+    code, out, _ = own(capsys, "next")
+    assert out.splitlines()[0].startswith("PLAN full: ▶pr-draft")
+    assert out.splitlines()[1].startswith("NEXT: do pr-draft")
+
+
+def prs(capsys, *argv):
+    code = cli.main(list(argv), prog="prs")
+    out = capsys.readouterr()
+    return code, out.out, out.err
+
+
+def started_pr(capsys, monkeypatch, nudges):
+    from ownpr import overview
+    monkeypatch.setattr(overview, "real_type", lambda *a: nudges.append(a) or True)
+    monkeypatch.setenv("AGTERM_SESSION_ID", "A1")
+    own(capsys, "start", "--profile", "full")
+    own(capsys, "bind", "https://github.com/pdffiller/jsfiller/pull/7")
+    return cli.open_journal().open_runs()[0]["id"]
+
+
+def test_prs_done_records_a_human_step_ahead_of_time(cfg, checkout, capsys, monkeypatch):
+    nudges = []
+    rid = started_pr(capsys, monkeypatch, nudges)
+    code, out, _ = prs(capsys, "done", "7", "eyeball")
+    assert code == 0
+    st = cli.open_journal().steps(rid)["eyeball"]
+    assert (st["status"], st["by"]) == ("done", "human")
+    assert nudges == []
+
+
+def test_prs_done_nudges_a_session_waiting_on_that_step(cfg, checkout, capsys, monkeypatch):
+    nudges = []
+    started_pr(capsys, monkeypatch, nudges)
+    own(capsys, "step", "pr-draft", "done")
+    own(capsys, "step", "decomment", "done")
+    prs(capsys, "done", "7", "eyeball")
+    session, pane, text = nudges[0]
+    assert session == "A1" and "eyeball recorded by the human" in text and text.endswith("\n")
+
+
+def test_prs_skip_needs_a_note(cfg, checkout, capsys, monkeypatch):
+    started_pr(capsys, monkeypatch, [])
+    code, _, err = prs(capsys, "skip", "7", "deploy-rc")
+    assert code == 2 and "reason" in err
+    assert prs(capsys, "skip", "7", "deploy-rc", "--note", "no rc")[0] == 0
+
+
+def test_prs_away_switches_one_run(cfg, checkout, capsys, monkeypatch):
+    nudges = []
+    rid = started_pr(capsys, monkeypatch, nudges)
+    own(capsys, "step", "pr-draft", "done")
+    own(capsys, "step", "decomment", "done")
+    assert prs(capsys, "away", "7")[0] == 0
+    assert cli.open_journal().run(rid)["mode_run"] == "away"
+    assert nudges and "now away" in nudges[0][2]
+    assert prs(capsys, "attended", "7")[0] == 0
+    assert cli.open_journal().run(rid)["mode_run"] == "attended"
+
+
+def test_prs_done_unknown_step(cfg, checkout, capsys, monkeypatch):
+    started_pr(capsys, monkeypatch, [])
+    code, _, err = prs(capsys, "done", "7", "nope")
+    assert code == 2 and "not in profile" in err

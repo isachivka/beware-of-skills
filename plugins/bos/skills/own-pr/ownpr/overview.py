@@ -115,7 +115,7 @@ def owed_report(journal):
     return "\n".join(out) or "Nothing is waiting on you."
 
 
-def go(journal, target, select):
+def resolve(journal, target):
     runs, t = journal.open_runs(), str(target).strip()
     matches = [r for r in runs if t in (r["id"], r["pr_url"])]
     m = re.match(r"^(?:(?P<repo>[\w.-]+/[\w.-]+)#|#)?(?P<num>\d+)$", t)
@@ -128,7 +128,12 @@ def go(journal, target, select):
         raise ValueError("%s is ambiguous: %s; use owner/repo#N or the run id" % (
             t, ", ".join("%s#%s (run %s)" % (short_repo(r["repo"]), r["pr_number"], r["id"])
                          for r in matches)))
-    run = matches[0]
+    return matches[0]
+
+
+def go(journal, target, select):
+    run = resolve(journal, target)
+    t = str(target).strip()
     sid = run["agterm_session"]
     if not sid:
         raise ValueError("no agterm session recorded for %s (run %s)" % (t, run["id"]))
@@ -173,5 +178,9 @@ def real_type(session, pane, text):
 
 
 def notify(run, change, typer):
-    text = "own-pr: %s changed (%s). Run `own-pr next`.\n" % (run["pr_url"], change)
+    return nudge(run, "changed (%s)" % change, typer)
+
+
+def nudge(run, message, typer):
+    text = "own-pr: %s %s. Run `own-pr next`.\n" % (run["pr_url"] or run["branch"], message)
     return typer(run["agterm_session"], run["agterm_pane"], text)

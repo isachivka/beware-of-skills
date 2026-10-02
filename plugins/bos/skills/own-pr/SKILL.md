@@ -40,6 +40,13 @@ Once the PR exists: `own-pr bind <pr-url>`.
 
 ## The user's steps
 
+`own-pr start` and every `own-pr next` print a `PLAN` line: the whole profile, `▶` where you
+are, `✓` done, `[you]` the user's steps. When the user says they already did something ("я
+посмотрел", "смёржил", "проверил на rc") — even a step that is still ahead — find it among the
+`[you]` steps in PLAN and record `own-pr step <id> done --by-human` right away. Exactly one
+`[you]` step fits: do it without asking. Several or none fit: ask, listing the `[you]` step ids.
+The user can also record it themselves with `prs done <pr> <step>`.
+
 - `the human's step — ask them and wait`: tell the user what is needed and stop until they
   answer. Record `--by-human` only for what they actually did or said.
 - `agent decides` (away mode): make the decision the user would make, and record `done` with
@@ -68,6 +75,7 @@ Record these only when the user said them in this session:
 | `own-pr adopt <run>` | This session takes over a run another session started |
 | `own-pr close` | End the run |
 | `prs`, `prs owed`, `prs go <pr>` | Every PR in flight, what waits on the user, jump to the owning terminal |
+| `prs done\|skip <pr> <step>`, `prs away\|attended <pr>` | The user records their step or switches one PR's mode from their own terminal; a session waiting on it gets a nudge |
 
 ## Rules
 

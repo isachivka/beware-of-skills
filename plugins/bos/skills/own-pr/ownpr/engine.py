@@ -35,6 +35,24 @@ def running_steps(journal, run):
     return [s for s, v in journal.steps(run["id"]).items() if v["status"] == "running"]
 
 
+def plan_line(journal, repo, run, action):
+    """The whole profile in one line: where the run is, what is done, which steps are the human's."""
+    states = journal.steps(run["id"])
+    parts = []
+    for sid in profile_steps(repo, run):
+        status, step = states.get(sid, {}).get("status", "pending"), repo.steps[sid]
+        tags = (["you"] if step.kind == "human" else []) + (["wait"] if step.away == "wait" else [])
+        if status == "deferred":
+            tags.append("deferred")
+        name = sid + ("[%s]" % ", ".join(tags) if tags else "")
+        if action.kind != "done" and action.step == sid:
+            name = "▶" + name
+        else:
+            name = {"done": "✓", "skipped": "-", "failed": "✗"}.get(status, "") + name
+        parts.append(name)
+    return "PLAN %s: %s" % (run["profile"], " · ".join(parts))
+
+
 def mode_label(mode, source):
     return "%s (%s)" % (mode, source) if source else mode
 

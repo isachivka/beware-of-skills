@@ -300,3 +300,20 @@ def test_attended_offers_deferred_steps_during_a_long_wait(with_merge):
     assert (a.kind, a.step, a.waits) == ("do", "eyeball", True)
     a = engine.next_action(j, repo, run(j, rid), "away")
     assert (a.kind, a.step) == ("reconcile", "team-feedback")
+
+
+def test_plan_line(with_merge):
+    j, repo, rid = with_merge
+    finish(j, rid, "pr-draft")
+    j.set_step(rid, "ci", "failed")
+    line = engine.plan_line(j, repo, run(j, rid), engine.Action("do", "decomment"))
+    assert line == ("PLAN full: ✓pr-draft · ▶decomment · eyeball[you] · review[you] · ✗ci · deploy-rc"
+                    " · team-handoff · team-feedback · merge[you, wait]")
+
+
+def test_plan_line_marks_deferred_and_skipped(with_merge):
+    j, repo, rid = with_merge
+    j.set_step(rid, "eyeball", "deferred")
+    j.set_step(rid, "deploy-rc", "skipped", by="human")
+    line = engine.plan_line(j, repo, run(j, rid), engine.Action("done"))
+    assert "eyeball[you, deferred]" in line and "-deploy-rc" in line and "▶" not in line

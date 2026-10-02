@@ -76,6 +76,8 @@ def cmd_start(args, j):
             j.add_owed(run_id, "profile %s chosen by the agent: %s" % (profile, args.auto_reason))
     print("run %s: %s %s, profile %s (%s), origin %s"
           % (run_id, co["repo"], co["branch"], profile, by, origin.name if origin else "none"))
+    run = j.run(run_id)
+    print(engine.plan_line(j, repo, run, engine.peek(j, repo, run, run_mode(run)[0])))
     return 0
 
 
@@ -134,6 +136,7 @@ def cmd_next(args, j):
     added = [s for s in engine.profile_steps(repo, run) if s not in j.steps(run["id"])]
     action = engine.next_action(j, repo, run, mode, mode_source=source)
     evidence = j.steps(run["id"]).get(action.step, {}).get("evidence") if action.step else None
+    print(engine.plan_line(j, repo, j.run(run["id"]), action))
     print(render_action(action, repo, j.run(run["id"]), run_origin(run), added, evidence))
     return 0
 
@@ -445,6 +448,35 @@ def own_pr_parser():
     return ap
 
 
+def prs_record(j, args):
+    """The human acts on a run from their own terminal; a session waiting on it gets a nudge."""
+    from . import overview
+    run = overview.resolve(j, args.pr)
+    repo = config.load_repo(run["repo"])
+    mode, source = run_mode(run)
+    before = engine.peek(j, repo, run, mode)
+    if args.cmd in ("away", "attended"):
+        j.update_run(run["id"], mode_run=args.cmd)
+        run = j.run(run["id"])
+        after = engine.peek(j, repo, run, args.cmd)
+        said = "run %s is now %s" % (run["id"], args.cmd)
+        message = "is now %s" % args.cmd
+        nudge = before.waits and not after.waits
+    else:
+        status = "done" if args.cmd == "done" else "skipped"
+        engine.record_step(j, repo, run, args.step, status, mode, note=args.note, by_human=True,
+                           mode_source=source)
+        said = "%s %s by the human" % (args.step, status)
+        message = "%s recorded by the human" % args.step
+        nudge = before.waits and before.step == args.step
+    if nudge and run["agterm_session"]:
+        if overview.nudge(run, message, overview.real_type):
+            said += "; nudged agterm session %s" % run["agterm_session"][:8]
+        else:
+            said += "; could not type into agterm session %s" % run["agterm_session"][:8]
+    return said
+
+
 def prs_main(argv):
     from . import overview
     ap = argparse.ArgumentParser(
@@ -453,12 +485,25 @@ def prs_main(argv):
                     "doing now, what it owes the human, CI, last activity, owning terminal), then\n"
                     "your open PRs that no run tracks.",
         epilog="examples:\n  prs\n  prs owed\n  prs go 13300                 by number, if it is unique\n"
-               "  prs go owner/repo#N          when two repos share a number\n")
+               "  prs go owner/repo#N          when two repos share a number\n"
+               "  prs done 13300 eyeball       I looked at it already (also ahead of time)\n"
+               "  prs skip 13300 aqa --note \"no UI change\"\n"
+               "  prs away 13300               this PR goes on without me\n")
     ap.add_argument("--no-gh", action="store_true", help="do not ask GitHub (offline, faster)")
     sub = ap.add_subparsers(dest="cmd", metavar="<command>")
     sub.add_parser("owed", help="everything waiting on the human, with ids for `own-pr clear`")
     p = sub.add_parser("go", help="switch to the agterm session that owns a PR")
     p.add_argument("pr", help="N, #N, owner/repo#N, PR url or run id")
+    for name, summary in (("done", "you did this step of a PR (even ahead of time): record it by=human"),
+                          ("skip", "you decided this step of a PR is not needed: record it with your reason")):
+        p = sub.add_parser(name, help=summary)
+        p.add_argument("pr", help="N, #N, owner/repo#N, PR url or run id")
+        p.add_argument("step", help="step id, as shown in the PLAN line or `own-pr explain`")
+        p.add_argument("--note", metavar="TEXT", help="what you did, or why it is skipped (required for skip)")
+    for name, summary in (("away", "this PR alone goes on in away mode"),
+                          ("attended", "this PR alone waits for you again")):
+        p = sub.add_parser(name, help=summary)
+        p.add_argument("pr", help="N, #N, owner/repo#N, PR url or run id")
     args = ap.parse_args(argv)
     try:
         j = open_journal()
@@ -466,6 +511,8 @@ def prs_main(argv):
             print(overview.owed_report(j))
         elif args.cmd == "go":
             print(overview.go(j, args.pr, overview.real_select))
+        elif args.cmd in ("done", "skip", "away", "attended"):
+            print(prs_record(j, args))
         else:
             print(overview.table(j, (lambda a: None) if args.no_gh else overview.real_gh))
     except (ValueError,) + ERRORS as exc:

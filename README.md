@@ -332,6 +332,8 @@ own-pr away             # I'm leaving: defer my steps, keep everything else movi
 prs                     # every PR in flight: step, what waits on me, CI, terminal
 prs owed                # what waits on me
 prs go 42               # jump to the terminal driving that PR
+prs done 42 eyeball     # I already looked at it (also ahead of time); a waiting session is nudged
+prs away 42             # this PR goes on without me
 own-pr explain          # this checkout's resolved steps, with the file each came from
 ```
 
