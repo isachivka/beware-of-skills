@@ -13,6 +13,7 @@ and Codex CLI.
 | [peer-chat](#peer-chat)           | Claude Code and Codex talk to each other across a split pane                                 |
 | [agterm-backup](#agterm-backup)   | Reboot the Mac, get every running Claude/Codex session back resumed in its pane              |
 | [agterm-fork](#agterm-fork)       | Fork a live session into a sibling with the whole conversation                               |
+| [agterm-restart](#agterm-restart) | Restart every running Claude in place, each resumed with its own flags                       |
 | [agterm-archive](#agterm-archive) | Park a whole workspace on disk, restore it later with every agent resumed                   |
 | [memory-review](#memory-review)   | Turn an agent's memory pile into one annotatable document, apply your verdicts safely       |
 | [revdiff-ru](#revdiff-ru)         | Code review with everything but the code translated to Russian, line numbers intact         |
@@ -191,6 +192,25 @@ claude id, so it is read from the live record that skill's hook writes.
 
 **Triggers:** `/bos:agterm-fork`, "fork this session", "continue this in a sibling tab".
 
+### agterm-restart
+
+Restarts every Claude Code running in agterm without losing a conversation: Ctrl+C in each
+pane, read the `claude --resume <id>` line claude prints on exit, type the resume back into the
+same pane with the original launch flags. For when running sessions must pick up something
+they only read at startup — a new binary, `settings.json` env, MCP servers.
+
+```bash
+agterm-restart --dry-run   # what would restart
+agterm-restart             # restart (skips mid-turn panes; --busy to include them)
+agterm-restart install     # add "Restart claude sessions" to the palette (cmd+ctrl+a>c)
+```
+
+The palette entry runs in an overlay on the current session and stays open with the report.
+A launch prompt in the old argv is not replayed, and the "resume full session or summary"
+question is answered "full session".
+
+**Triggers:** `/bos:agterm-restart`, "restart all claude sessions".
+
 ### agterm-archive
 
 Parks a whole workspace on disk. Snapshots every session — order, names, cwds, splits with
@@ -302,7 +322,7 @@ own-pr bind https://github.com/acme/app/pull/42
 own-pr step pr-open done --evidence https://github.com/acme/app/pull/42
 own-pr next                      # NEXT: do decomment ...
 own-pr step ci running           # before a long wait
-own-pr watch                     # wait for reviews, comments, merge (Monitor in Claude, --notify in Codex)
+own-pr watch --notify --detach  # wait for reviews, comments, merge; a change is typed into this session
 ```
 
 And you, from any terminal:

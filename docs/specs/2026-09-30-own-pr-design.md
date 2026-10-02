@@ -272,9 +272,11 @@ Only `typing-wave` exists today (Igor, 2026-09-30); other profiles come when he 
 ## Waiting on the team
 
 `own-pr watch` polls the PR and exits when its state, review decision, reviews or comments
-change. Claude Code runs it under the Monitor tool, whose exit wakes the session. Codex has no
-background wake-up, so it runs `own-pr watch --notify` detached; on a change that types a trigger
-line into the run's recorded agterm session and pane.
+change. Reviews take days, longer than any tool call lives (Claude's Monitor expires after 30
+minutes, a background shell after 2 hours; seen on the first real run, 2026-10-01). So both
+agents use `own-pr watch --notify --detach`: it returns at once, and a background watcher types
+a trigger line into the run's recorded agterm session and pane when the PR changes. One watcher
+per run (a pid file in the state dir); a second is refused while the first is alive.
 
 ## Migration
 

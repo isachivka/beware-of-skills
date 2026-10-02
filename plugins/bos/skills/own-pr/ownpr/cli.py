@@ -250,14 +250,60 @@ def cmd_adopt(args, j):
     return 0
 
 
+def watcher_pidfile(run_id):
+    return os.path.join(config.state_dir(), "watch-%s.pid" % run_id)
+
+
+def pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def cmd_watch(args, j):
+    import subprocess
     from . import overview
     run = current_run(j, args)
     if not run["pr_url"]:
         raise Fail("run %s has no PR yet; `own-pr bind <url>` first" % run["id"])
+    if args.detach and not args.notify:
+        raise Fail("--detach needs --notify: a detached watcher can only report by typing into the session")
     if args.notify and not run["agterm_session"]:
         raise Fail("run %s has no agterm session recorded; --notify has nowhere to type" % run["id"])
-    change = overview.watch(run, overview.real_gh, time.sleep, args.interval)
+    pidfile = watcher_pidfile(run["id"])
+    try:
+        with open(pidfile) as fh:
+            other = int(fh.read().strip())
+    except (OSError, ValueError):
+        other = None
+    if other and other != os.getpid() and pid_alive(other):
+        raise Fail("already watching run %s (pid %d)" % (run["id"], other))
+    if args.detach:
+        entry = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "own-pr")
+        child = subprocess.Popen(
+            [sys.executable, entry, "--run", run["id"], "watch", "--notify", "--interval", str(args.interval)],
+            cwd=run["checkout"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, start_new_session=True)
+        print("watching %s in the background (pid %d); a change is typed into agterm session %s"
+              % (run["pr_url"], child.pid, run["agterm_session"][:8]))
+        return 0
+    os.makedirs(os.path.dirname(pidfile), exist_ok=True)
+    with open(pidfile, "w") as fh:
+        fh.write(str(os.getpid()))
+    try:
+        change = overview.watch(run, overview.real_gh, time.sleep, args.interval)
+    finally:
+        try:
+            with open(pidfile) as fh:
+                mine = fh.read().strip() == str(os.getpid())
+            if mine:
+                os.remove(pidfile)
+        except OSError:
+            pass
     print("%s: %s" % (run["pr_url"], change))
     if args.notify and not overview.notify(run, change, overview.real_type):
         raise Fail("could not type into agterm session %s" % run["agterm_session"][:8])
@@ -384,14 +430,16 @@ def own_pr_parser():
     p = cmd("watch", cmd_watch, "wait until the PR changes: a review, a comment, approval, merge",
             "Poll the PR every --interval seconds and exit when its state, review decision,\n"
             "reviews or comments change, printing what changed. The first poll is the baseline.\n\n"
-            "Claude Code: run it under the Monitor tool; its exit wakes the session.\n"
-            "Codex (no background wake-up): run it detached with --notify, e.g.\n"
-            "  nohup own-pr watch --notify >/dev/null 2>&1 &\n"
-            "and it types `own-pr: <pr> changed (...). Run own-pr next.` into this run's\n"
-            "agterm session and pane.")
+            "Waiting longer than a tool call can (reviews take days), in Claude Code and Codex alike:\n"
+            "  own-pr watch --notify --detach\n"
+            "returns at once; a background watcher types `own-pr: <pr> changed (...). Run own-pr\n"
+            "next.` into this run's agterm session and pane when the PR changes. One watcher per\n"
+            "run: a second one is refused while the first is alive.")
     p.add_argument("--interval", type=int, default=120, metavar="SECONDS", help="poll interval (default 120)")
     p.add_argument("--notify", action="store_true",
                    help="on change, type a trigger line into the run's agterm session")
+    p.add_argument("--detach", action="store_true",
+                   help="with --notify: run the watcher in the background and return at once")
     cmd("close", cmd_close, "end the run (refused while a step is running)")
     cmd("export", cmd_export, "print the whole journal as JSON")
     return ap

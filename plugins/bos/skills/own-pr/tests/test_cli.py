@@ -317,3 +317,66 @@ def test_start_records_the_pane(cfg, checkout, capsys, monkeypatch):
     monkeypatch.setenv("AGTERM_PANE", "right")
     own(capsys, "start", "--profile", "full")
     assert cli.open_journal().open_runs()[0]["agterm_pane"] == "right"
+
+
+def bound_run(capsys, monkeypatch):
+    from ownpr import overview
+
+    def no_polling(*a):
+        raise AssertionError("watch must not poll GitHub in this test")
+    monkeypatch.setattr(overview, "watch", no_polling)
+    monkeypatch.setenv("AGTERM_SESSION_ID", "A1")
+    own(capsys, "start", "--profile", "full")
+    own(capsys, "bind", "https://github.com/pdffiller/jsfiller/pull/7")
+    return cli.open_journal().open_runs()[0]["id"]
+
+
+def test_watch_refuses_a_second_watcher(cfg, checkout, capsys, monkeypatch, tmp_path):
+    import os
+    rid = bound_run(capsys, monkeypatch)
+    pidfile = tmp_path / "state" / ("watch-%s.pid" % rid)
+    pidfile.write_text(str(os.getppid()))
+    code, _, err = own(capsys, "watch", "--notify")
+    assert code == 2 and "already watching" in err
+
+
+def test_watch_takes_over_a_stale_pidfile_and_cleans_up(cfg, checkout, capsys, monkeypatch, tmp_path):
+    from ownpr import overview
+    rid = bound_run(capsys, monkeypatch)
+    pidfile = tmp_path / "state" / ("watch-%s.pid" % rid)
+    pidfile.write_text("999999")
+    typed = []
+    monkeypatch.setattr(overview, "watch", lambda *a: "reviews 0 -> 1")
+    monkeypatch.setattr(overview, "real_type", lambda *a: typed.append(a) or True)
+    code, out, _ = own(capsys, "watch", "--notify")
+    assert code == 0 and "reviews 0 -> 1" in out and typed
+    assert not pidfile.exists()
+
+
+def test_watch_detach_spawns_itself_in_a_new_session(cfg, checkout, capsys, monkeypatch):
+    import subprocess
+    bound_run(capsys, monkeypatch)
+    spawned, real_popen = [], subprocess.Popen
+
+    class P:
+        pid = 4242
+
+        def __new__(cls, args, **kw):
+            if "watch" not in args:
+                return real_popen(args, **kw)
+            spawned.append((args, kw))
+            return super().__new__(cls)
+
+        def __init__(self, args, **kw):
+            pass
+    monkeypatch.setattr(subprocess, "Popen", P)
+    code, out, _ = own(capsys, "watch", "--notify", "--detach")
+    args, kw = spawned[0]
+    assert code == 0 and "4242" in out
+    assert "--notify" in args and "--detach" not in args and kw["start_new_session"] is True
+
+
+def test_detach_needs_notify(cfg, checkout, capsys, monkeypatch):
+    bound_run(capsys, monkeypatch)
+    code, _, err = own(capsys, "watch", "--detach")
+    assert code == 2 and "--notify" in err
