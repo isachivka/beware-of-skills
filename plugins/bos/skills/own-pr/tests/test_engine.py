@@ -317,3 +317,14 @@ def test_plan_line_marks_deferred_and_skipped(with_merge):
     j.set_step(rid, "deploy-rc", "skipped", by="human")
     line = engine.plan_line(j, repo, run(j, rid), engine.Action("done"))
     assert "eyeball[you, deferred]" in line and "-deploy-rc" in line and "▶" not in line
+
+
+def test_recording_a_step_added_to_the_profile_later(env, cfg):
+    j, repo, rid = env
+    write(cfg / "steps" / "strip-tests.md", "---\nkind: auto\naway: run\n---\nStrip.\n")
+    write(repo_dir(cfg) / "profiles" / "full.md",
+          "---\ndescription: d\nsteps: pr-draft, strip-tests, decomment, eyeball, review, ci,"
+          " deploy-rc, team-handoff, team-feedback\n---\n")
+    repo = config.load_repo(REPO)
+    engine.record_step(j, repo, run(j, rid), "strip-tests", "done", "attended")
+    assert j.steps(rid)["strip-tests"]["status"] == "done"

@@ -111,6 +111,7 @@ def next_action(journal, repo, run, mode, mode_source=None):
 def record_step(journal, repo, run, step_id, status, mode, evidence=None, note=None, by_human=False,
                 mode_source=None):
     order = profile_steps(repo, run)
+    journal.ensure_steps(run["id"], order)
     in_flight = journal.steps(run["id"]).get(step_id, {}).get("status") == "running"
     if step_id not in order and not (in_flight and status in ("done", "failed")):
         raise RuleError("step %r is not in profile %s" % (step_id, run["profile"]))
