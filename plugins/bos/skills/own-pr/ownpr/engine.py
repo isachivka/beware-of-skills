@@ -53,6 +53,18 @@ def plan_line(journal, repo, run, action):
     return "PLAN %s: %s" % (run["profile"], " · ".join(parts))
 
 
+def plan_text(journal, repo, run, action):
+    """The PLAN line, then each human step with its summary, so the agent knows what they mean."""
+    lines = [plan_line(journal, repo, run, action)]
+    for sid in profile_steps(repo, run):
+        step = repo.steps[sid]
+        if step.kind != "human":
+            continue
+        name = "%s[you%s]" % (sid, ", wait" if step.away == "wait" else "")
+        lines.append("  %s: %s" % (name, step.summary) if step.summary else "  " + name)
+    return "\n".join(lines)
+
+
 def mode_label(mode, source):
     return "%s (%s)" % (mode, source) if source else mode
 

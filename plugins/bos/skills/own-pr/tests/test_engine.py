@@ -328,3 +328,13 @@ def test_recording_a_step_added_to_the_profile_later(env, cfg):
     repo = config.load_repo(REPO)
     engine.record_step(j, repo, run(j, rid), "strip-tests", "done", "attended")
     assert j.steps(rid)["strip-tests"]["status"] == "done"
+
+
+def test_plan_text_lists_the_human_steps_with_summaries(with_merge, cfg):
+    j, repo, rid = with_merge
+    write(cfg / "steps" / "eyeball.md", "---\nkind: human\naway: defer\nsummary: the human reads the PR\n---\nLook.\n")
+    repo = config.load_repo(REPO)
+    text = engine.plan_text(j, repo, run(j, rid), engine.Action("do", "pr-draft"))
+    lines = text.splitlines()
+    assert lines[0].startswith("PLAN full: ▶pr-draft")
+    assert lines[1:] == ["  eyeball[you]: the human reads the PR", "  review[you]", "  merge[you, wait]"]

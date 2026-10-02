@@ -77,7 +77,7 @@ def cmd_start(args, j):
     print("run %s: %s %s, profile %s (%s), origin %s"
           % (run_id, co["repo"], co["branch"], profile, by, origin.name if origin else "none"))
     run = j.run(run_id)
-    print(engine.plan_line(j, repo, run, engine.peek(j, repo, run, run_mode(run)[0])))
+    print(engine.plan_text(j, repo, run, engine.peek(j, repo, run, run_mode(run)[0])))
     return 0
 
 
@@ -136,7 +136,7 @@ def cmd_next(args, j):
     added = [s for s in engine.profile_steps(repo, run) if s not in j.steps(run["id"])]
     action = engine.next_action(j, repo, run, mode, mode_source=source)
     evidence = j.steps(run["id"]).get(action.step, {}).get("evidence") if action.step else None
-    print(engine.plan_line(j, repo, j.run(run["id"]), action))
+    print(engine.plan_text(j, repo, j.run(run["id"]), action))
     print(render_action(action, repo, j.run(run["id"]), run_origin(run), added, evidence))
     return 0
 

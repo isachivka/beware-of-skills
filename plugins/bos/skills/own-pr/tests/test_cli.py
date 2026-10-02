@@ -6,6 +6,10 @@ from conftest import REPO, git, repo_dir, write
 from ownpr import cli
 
 
+def next_line(out):
+    return next(line for line in out.splitlines() if line.startswith("NEXT"))
+
+
 def own(capsys, *argv):
     code = cli.main(list(argv))
     out = capsys.readouterr()
@@ -54,7 +58,7 @@ def test_next_prints_step_prose_and_context(cfg, checkout, capsys):
     own(capsys, "bind", "https://github.com/pdffiller/jsfiller/pull/13300")
     code, out, _ = own(capsys, "next")
     assert code == 0
-    assert out.splitlines()[1] == "NEXT: do pr-draft  (kind=auto, mode=attended)"
+    assert next_line(out) == "NEXT: do pr-draft  (kind=auto, mode=attended)"
     assert "PR: https://github.com/pdffiller/jsfiller/pull/13300" in out
     assert "Origin wso: Start every Slack post with 🤖 WS." in out
     assert out.rstrip().endswith("Do pr-draft.")
@@ -212,7 +216,7 @@ def test_away_flow_reaches_handoff(cfg, checkout, capsys, monkeypatch):
     own(capsys, "step", "ci", "done")
     own(capsys, "step", "deploy-rc", "done")
     code, out, _ = own(capsys, "next")
-    assert out.splitlines()[1] == "NEXT: do team-handoff  (kind=auto, mode=away)"
+    assert next_line(out) == "NEXT: do team-handoff  (kind=auto, mode=away)"
     assert own(capsys, "step", "team-handoff", "done")[0] == 0
 
 
@@ -221,7 +225,7 @@ def test_human_step_says_wait(cfg, checkout, capsys):
     own(capsys, "step", "pr-draft", "done")
     own(capsys, "step", "decomment", "done")
     code, out, _ = own(capsys, "next")
-    assert out.splitlines()[1] == "NEXT: do eyeball  (kind=human, mode=attended, the human's step — ask them and wait)"
+    assert next_line(out) == "NEXT: do eyeball  (kind=human, mode=attended, the human's step — ask them and wait)"
 
 
 def test_handoff_check_is_gone(cfg, checkout, capsys):
@@ -387,7 +391,7 @@ def test_start_and_next_print_the_plan(cfg, checkout, capsys):
     assert "PLAN full: ▶pr-draft · decomment · eyeball[you]" in out
     code, out, _ = own(capsys, "next")
     assert out.splitlines()[0].startswith("PLAN full: ▶pr-draft")
-    assert out.splitlines()[1].startswith("NEXT: do pr-draft")
+    assert next_line(out).startswith("NEXT: do pr-draft")
 
 
 def prs(capsys, *argv):

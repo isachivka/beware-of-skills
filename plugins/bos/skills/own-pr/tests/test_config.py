@@ -157,3 +157,10 @@ def test_file_without_frontmatter_has_no_keys(cfg):
 def test_repo_is_just_a_directory(cfg):
     assert not (repo_dir(cfg) / "repo.md").exists()
     assert set(config.load_repo(REPO).profiles) == {"full", "quick"}
+
+
+def test_step_summary_is_optional(cfg):
+    write(cfg / "steps" / "eyeball.md", "---\nkind: human\naway: defer\nsummary: the human reads the PR\n---\nLook.\n")
+    repo = config.load_repo(REPO)
+    assert repo.steps["eyeball"].summary == "the human reads the PR"
+    assert repo.steps["ci"].summary == ""

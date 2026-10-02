@@ -66,6 +66,7 @@ class Step:
     away: str
     body: str
     source: str
+    summary: str = ""
 
 
 @dataclass
@@ -106,7 +107,7 @@ def md_files(directory):
 
 def load_step(path):
     keys, body = read_md(path)
-    check_keys(keys, STEP_KEYS, STEP_KEYS, path)
+    check_keys(keys, tuple(STEP_KEYS) + ("summary",), STEP_KEYS, path)
     for key, allowed in STEP_KEYS.items():
         if keys[key] not in allowed:
             raise ConfigError("%s: %s must be one of %s, got %r"
@@ -114,7 +115,7 @@ def load_step(path):
     if keys["away"] not in AWAY_BY_KIND[keys["kind"]]:
         raise ConfigError("%s: a %s step takes away: %s, got %r"
                           % (path, keys["kind"], "|".join(AWAY_BY_KIND[keys["kind"]]), keys["away"]))
-    return Step(stem(path), keys["kind"], keys["away"], body, path)
+    return Step(stem(path), keys["kind"], keys["away"], body, path, keys.get("summary", ""))
 
 
 def load_steps(directory):

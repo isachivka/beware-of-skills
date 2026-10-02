@@ -41,7 +41,7 @@ Once the PR exists: `own-pr bind <pr-url>`.
 ## The user's steps
 
 `own-pr start` and every `own-pr next` print a `PLAN` line: the whole profile, `▶` where you
-are, `✓` done, `[you]` the user's steps. When the user says they already did something ("я
+are, `✓` done, `[you]` the user's steps, each listed below it with a one-line summary. When the user says they already did something ("я
 посмотрел", "смёржил", "проверил на rc") — even a step that is still ahead — find it among the
 `[you]` steps in PLAN and record `own-pr step <id> done --by-human` right away. Exactly one
 `[you]` step fits: do it without asking. Several or none fit: ask, listing the `[you]` step ids.

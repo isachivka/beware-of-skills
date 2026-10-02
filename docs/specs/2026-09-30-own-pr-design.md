@@ -71,7 +71,8 @@ lives in the step files.
 All files are Markdown with YAML-style frontmatter between `---` lines, as in skills: only
 `key: value` lines, values literal (no inline comments). Everything after the frontmatter is
 prose for the agent. `kind` is `auto|human`; `away` is `run` for auto steps and
-`defer|auto-pick|wait` for human ones. Unknown keys are errors. A repo is just a directory of
+`defer|auto-pick|wait` for human ones; optional `summary` is one line saying what the step
+means, printed under the PLAN line for human steps. Unknown keys are errors. A repo is just a directory of
 steps and profiles; there is no per-repo settings file.
 
 ### Step file

@@ -300,7 +300,8 @@ Attended: once the human has made their picks in its revdiff, record done `--by-
 Away: make the picks yourself and record done with `--note` listing what you took and why.
 ```
 
-`kind` is `auto` (the agent does it) or `human`. `away` says what a human step does while
+`kind` is `auto` (the agent does it) or `human`; an optional `summary:` line says in a few words what a
+human step means, and `own-pr next` lists it under the PLAN line. `away` says what a human step does while
 you are away: `defer` (skip it, owe it to you), `auto-pick` (the agent decides and owes you
 the decision) or `wait` (never skipped, e.g. merge). Auto steps take `away: run`.
 
