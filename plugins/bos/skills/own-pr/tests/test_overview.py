@@ -223,3 +223,39 @@ def test_notify_types_into_the_recorded_pane(j):
     sid, pane, text = typed[0]
     assert (sid, pane) == ("2F400916-AAAA", "right")
     assert text.startswith("own-pr: %s changed (reviews 0 -> 1)" % URL) and text.endswith("\n")
+
+
+def test_table_shows_the_iteration(j):
+    rid = start(j, "feature/x", URL)
+    j.db.execute("UPDATE runs SET loop_id = ?, iteration = 7 WHERE id = ?", (rid, rid))
+    out = overview.table(j, lambda a: None)
+    assert "ITER" in out.splitlines()[0]
+    assert " 7 " in next(l for l in out.splitlines() if l.startswith("#13300"))
+
+
+def test_log_lists_closed_items_newest_first(j):
+    a = start(j, "feature/a", URL)
+    j.set_step(a, "pr-draft", "done", by="agent")
+    j.close_run(a)
+    b = start(j, "feature/b")
+    j.close_run(b)
+    out = overview.log(j)
+    lines = out.splitlines()
+    assert lines[0].split()[:3] == ["CLOSED", "PR", "PROFILE"]
+    assert "feature/b" in lines[1] and "#13300" in lines[2]
+
+
+def test_log_of_one_item_shows_its_steps(j):
+    a = start(j, "feature/a", URL)
+    j.set_step(a, "pr-draft", "done", evidence=URL, by="agent")
+    j.set_step(a, "eyeball", "done", by="human", note="looked")
+    j.close_run(a)
+    out = overview.log(j, "13300")
+    assert "pr-draft" in out and "done" in out and URL in out and "looked" in out and "human" in out
+
+
+def test_prs_log_entrypoint(j, capsys):
+    a = start(j, "feature/a", URL)
+    j.close_run(a)
+    assert cli.main(["log"], prog="prs") == 0
+    assert "#13300" in capsys.readouterr().out

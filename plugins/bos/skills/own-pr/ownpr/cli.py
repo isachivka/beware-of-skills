@@ -71,11 +71,13 @@ def cmd_start(args, j):
     with j.tx():
         run_id = j.create_run(co["repo"], co["branch"], co["toplevel"], profile, by,
                               repo.profiles[profile].steps, origin=origin.name if origin else None,
-                              mode_env=mode_env, identity=context.identity(os.environ))
+                              mode_env=mode_env, identity=context.identity(os.environ),
+                              iteration=1 if repo.profiles[profile].repeat else None)
         if by == "agent":
             j.add_owed(run_id, "profile %s chosen by the agent: %s" % (profile, args.auto_reason))
-    print("run %s: %s %s, profile %s (%s), origin %s"
-          % (run_id, co["repo"], co["branch"], profile, by, origin.name if origin else "none"))
+    print("run %s: %s %s, profile %s (%s), origin %s%s"
+          % (run_id, co["repo"], co["branch"], profile, by, origin.name if origin else "none",
+             ", iteration 1 (repeats)" if repo.profiles[profile].repeat else ""))
     run = j.run(run_id)
     print(engine.plan_text(j, repo, run, engine.peek(j, repo, run, run_mode(run)[0])))
     return 0
@@ -90,7 +92,10 @@ def cmd_bind(args, j):
     if repo_id != run["repo"]:
         raise Fail("%s belongs to %s, but this run is for %s" % (args.url, repo_id, run["repo"]))
     url = "https://%s/%s/pull/%s" % (m.group(1), m.group(2), m.group(3))
-    j.update_run(run["id"], pr_url=url, pr_number=int(m.group(3)))
+    from . import overview
+    # the PR's branch lets `own-pr` find this run from the PR's worktree as well
+    info = overview.real_gh(["pr", "view", url, "--json", "headRefName"]) or {}
+    j.update_run(run["id"], pr_url=url, pr_number=int(m.group(3)), pr_branch=info.get("headRefName"))
     print("run %s bound to %s" % (run["id"], args.url))
     return 0
 
@@ -135,6 +140,18 @@ def cmd_next(args, j):
     mode, source = run_mode(run)
     added = [s for s in engine.profile_steps(repo, run) if s not in j.steps(run["id"])]
     action = engine.next_action(j, repo, run, mode, mode_source=source)
+    if action.kind == "done" and repo.profiles[run["profile"]].repeat:
+        try:
+            new = engine.next_iteration(j, repo, run)
+        except engine.RuleError as exc:
+            print(engine.plan_text(j, repo, j.run(run["id"]), action))
+            print("NEXT: waiting — this iteration is over except the human's steps; the next one "
+                  "starts once they are done (%s)" % exc)
+            return 0
+        print("ITERATION %d started (run %s); iteration %d closed (run %s, see `prs log %s`)"
+              % (new["iteration"], new["id"], run["iteration"] or 1, run["id"], run["id"]))
+        run, added = new, []
+        action = engine.next_action(j, repo, run, mode, mode_source=source)
     evidence = j.steps(run["id"]).get(action.step, {}).get("evidence") if action.step else None
     print(engine.plan_text(j, repo, j.run(run["id"]), action))
     print(render_action(action, repo, j.run(run["id"]), run_origin(run), added, evidence))
@@ -488,10 +505,13 @@ def prs_main(argv):
                "  prs go owner/repo#N          when two repos share a number\n"
                "  prs done 13300 eyeball       I looked at it already (also ahead of time)\n"
                "  prs skip 13300 aqa --note \"no UI change\"\n"
-               "  prs away 13300               this PR goes on without me\n")
+               "  prs away 13300               this PR goes on without me\n"
+               "  prs log                      closed items; `prs log 13300` shows one item's steps\n")
     ap.add_argument("--no-gh", action="store_true", help="do not ask GitHub (offline, faster)")
     sub = ap.add_subparsers(dest="cmd", metavar="<command>")
     sub.add_parser("owed", help="everything waiting on the human, with ids for `own-pr clear`")
+    p = sub.add_parser("log", help="closed items, newest first; with a PR or run id, that item's steps")
+    p.add_argument("pr", nargs="?", help="N, #N, owner/repo#N, PR url or run id")
     p = sub.add_parser("go", help="switch to the agterm session that owns a PR")
     p.add_argument("pr", help="N, #N, owner/repo#N, PR url or run id")
     for name, summary in (("done", "you did this step of a PR (even ahead of time): record it by=human"),
@@ -511,6 +531,8 @@ def prs_main(argv):
             print(overview.owed_report(j))
         elif args.cmd == "go":
             print(overview.go(j, args.pr, overview.real_select))
+        elif args.cmd == "log":
+            print(overview.log(j, args.pr))
         elif args.cmd in ("done", "skip", "away", "attended"):
             print(prs_record(j, args))
         else:

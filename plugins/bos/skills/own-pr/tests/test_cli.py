@@ -452,3 +452,44 @@ def test_prs_done_unknown_step(cfg, checkout, capsys, monkeypatch):
     started_pr(capsys, monkeypatch, [])
     code, _, err = prs(capsys, "done", "7", "nope")
     assert code == 2 and "not in profile" in err
+
+
+def loop_profile(cfg):
+    write(repo_dir(cfg) / "profiles" / "loop.md",
+          "---\ndescription: d\nsteps: pr-draft, ci\nrepeat: true\n---\n")
+
+
+def test_repeat_profile_moves_to_the_next_item(cfg, checkout, capsys):
+    loop_profile(cfg)
+    code, out, _ = own(capsys, "start", "--profile", "loop")
+    assert "iteration 1" in out
+    own(capsys, "step", "pr-draft", "done")
+    own(capsys, "step", "ci", "done")
+    code, out, _ = own(capsys, "next")
+    assert "ITERATION 2 started" in out and "iteration 1 closed" in out
+    assert next_line(out).startswith("NEXT: do pr-draft")
+    runs = cli.open_journal().open_runs()
+    assert len(runs) == 1 and runs[0]["iteration"] == 2
+
+
+def test_non_repeat_profile_just_finishes(cfg, checkout, capsys):
+    own(capsys, "start", "--profile", "quick")
+    for s in ("pr-draft", "ci", "team-handoff", "team-feedback"):
+        own(capsys, "step", s, "done")
+    for s in ("eyeball", "review"):
+        own(capsys, "step", s, "done", "--by-human")
+    code, out, _ = own(capsys, "next")
+    assert "NEXT: done" in out and "ITERATION" not in out
+
+
+def test_bind_records_the_pr_branch_and_the_worktree_finds_the_item(cfg, checkout, capsys, monkeypatch):
+    from ownpr import overview
+    loop_profile(cfg)
+    monkeypatch.setattr(overview, "real_gh", lambda args: {"headRefName": "feature/wave57"})
+    own(capsys, "start", "--profile", "loop")
+    own(capsys, "bind", "https://github.com/pdffiller/jsfiller/pull/9")
+    rid = cli.open_journal().open_runs()[0]["id"]
+    assert cli.open_journal().run(rid)["pr_branch"] == "feature/wave57"
+    git(checkout, "checkout", "-q", "-b", "feature/wave57")
+    code, out, _ = own(capsys, "next")
+    assert code == 0 and "PLAN loop" in out

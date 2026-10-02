@@ -165,3 +165,21 @@ def test_old_journal_gains_new_columns(tmp_path):
     rid = j.create_run("github.com/o/r", "b", "/co", "full", "explicit", STEPS,
                        identity={"agterm": "A", "pane": "left"})
     assert j.run(rid)["agterm_pane"] == "left"
+
+
+def test_loop_fields_and_closed_runs(j):
+    rid = j.create_run("github.com/o/r", "develop", "/co", "loop", "explicit", STEPS, loop_id="L", iteration=3)
+    run = j.run(rid)
+    assert (run["loop_id"], run["iteration"]) == ("L", 3)
+    j.close_run(rid)
+    other = new_run(j, "feature/b")
+    j.close_run(other)
+    assert [r["id"] for r in j.closed_runs()] == [other, rid]
+
+
+def test_open_run_found_by_its_pr_branch(j):
+    rid = j.create_run("github.com/o/r", "develop", "/co", "loop", "explicit", STEPS)
+    j.update_run(rid, pr_url="https://github.com/o/r/pull/9", pr_number=9, pr_branch="feature/wave57")
+    assert j.find_open_run("github.com/o/r", "feature/wave57")["id"] == rid
+    assert j.find_open_run("github.com/o/r", "develop")["id"] == rid
+    assert j.find_open_run("github.com/o/r", "feature/other") is None

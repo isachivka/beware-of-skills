@@ -305,7 +305,9 @@ human step means, and `own-pr next` lists it under the PLAN line. `away` says wh
 you are away: `defer` (skip it, owe it to you), `auto-pick` (the agent decides and owes you
 the decision) or `wait` (never skipped, e.g. merge). Auto steps take `away: run`.
 
-A profile is a description and an ordered list of steps:
+A profile is a description and an ordered list of steps. With `repeat: true` it is an endless
+loop: each pass is its own item, closed when its last step is done, and the next one opens with
+no PR until it binds one. `prs log` lists the closed items; `prs log 42` shows one item's steps.
 
 ```markdown
 ---
@@ -335,6 +337,7 @@ prs owed                # what waits on me
 prs go 42               # jump to the terminal driving that PR
 prs done 42 eyeball     # I already looked at it (also ahead of time); a waiting session is nudged
 prs away 42             # this PR goes on without me
+prs log                 # closed items, newest first
 own-pr explain          # this checkout's resolved steps, with the file each came from
 ```
 

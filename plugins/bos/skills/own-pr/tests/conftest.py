@@ -68,3 +68,12 @@ def checkout(tmp_path, monkeypatch):
     git(repo, "checkout", "-q", "-b", "feature/x")
     monkeypatch.chdir(repo)
     return repo
+
+
+@pytest.fixture(autouse=True)
+def no_network(monkeypatch):
+    """Tests never reach GitHub or agterm; a test that needs an answer stubs it itself."""
+    from ownpr import overview
+    monkeypatch.setattr(overview, "real_gh", lambda args: None)
+    monkeypatch.setattr(overview, "real_type", lambda *a: False)
+    monkeypatch.setattr(overview, "real_select", lambda sid: False)

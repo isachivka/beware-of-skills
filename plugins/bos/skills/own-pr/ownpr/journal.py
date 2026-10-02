@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS runs (
   id TEXT PRIMARY KEY, repo TEXT NOT NULL, branch TEXT NOT NULL, checkout TEXT NOT NULL,
   pr_url TEXT, pr_number INTEGER, origin TEXT, profile TEXT NOT NULL, profile_by TEXT NOT NULL,
   mode_env TEXT, mode_run TEXT, claude_session TEXT, codex_session TEXT, agterm_session TEXT,
-  agterm_pane TEXT,
+  agterm_pane TEXT, loop_id TEXT, iteration INTEGER, pr_branch TEXT,
   state TEXT NOT NULL DEFAULT 'open', created REAL NOT NULL, updated REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS steps (
   run_id TEXT NOT NULL, step TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
@@ -28,9 +28,9 @@ CREATE TABLE IF NOT EXISTS events (
 """
 STATUSES = ("pending", "running", "done", "failed", "deferred", "skipped")
 UPDATABLE = ("pr_url", "pr_number", "profile", "profile_by", "mode_run",
-             "claude_session", "codex_session", "agterm_session", "agterm_pane")
+             "claude_session", "codex_session", "agterm_session", "agterm_pane", "pr_branch")
 # columns added after the first release; an older journal gets them on open
-ADDED_COLUMNS = {"runs": ("agterm_pane TEXT",)}
+ADDED_COLUMNS = {"runs": ("agterm_pane TEXT", "loop_id TEXT", "iteration INTEGER", "pr_branch TEXT")}
 
 
 class JournalError(Exception):
@@ -73,7 +73,7 @@ class Journal:
         self.db.execute("UPDATE runs SET updated = ? WHERE id = ?", (time.time(), run_id))
 
     def create_run(self, repo, branch, checkout, profile, profile_by, steps, origin=None,
-                   mode_env=None, identity=None):
+                   mode_env=None, identity=None, loop_id=None, iteration=None):
         ident = identity or {}
         run_id, now = uuid.uuid4().hex[:8], time.time()
         with self.tx():
@@ -83,11 +83,11 @@ class Journal:
                                    % (repo, branch, existing["id"], existing["id"]))
             self.db.execute(
                 "INSERT INTO runs (id, repo, branch, checkout, origin, profile, profile_by, mode_env,"
-                " claude_session, codex_session, agterm_session, agterm_pane, created, updated)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " claude_session, codex_session, agterm_session, agterm_pane, loop_id, iteration,"
+                " created, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (run_id, repo, branch, checkout, origin, profile, profile_by, mode_env,
                  ident.get("claude"), ident.get("codex"), ident.get("agterm"), ident.get("pane"),
-                 now, now))
+                 loop_id or (run_id if iteration is not None else None), iteration, now, now))
             for step in steps:
                 self.db.execute("INSERT INTO steps (run_id, step) VALUES (?, ?)", (run_id, step))
             self._event(run_id, "start", profile=profile, profile_by=profile_by, origin=origin)
@@ -100,9 +100,22 @@ class Journal:
         return dict(row)
 
     def find_open_run(self, repo, branch):
-        row = self.db.execute("SELECT * FROM runs WHERE repo = ? AND branch = ? AND state = 'open'",
-                              (repo, branch)).fetchone()
-        return dict(row) if row else None
+        """The open run of this branch, else the open run whose bound PR lives on this branch
+        (a loop item started in the main checkout, worked on in a worktree)."""
+        for column in ("branch", "pr_branch"):
+            row = self.db.execute("SELECT * FROM runs WHERE repo = ? AND %s = ? AND state = 'open'"
+                                  % column, (repo, branch)).fetchone()
+            if row:
+                return dict(row)
+        return None
+
+    def closed_runs(self, limit=50):
+        rows = self.db.execute("SELECT * FROM runs WHERE state = 'closed'"
+                               " ORDER BY updated DESC, rowid DESC LIMIT ?", (limit,))
+        return [dict(r) for r in rows]
+
+    def all_runs(self):
+        return [dict(r) for r in self.db.execute("SELECT * FROM runs ORDER BY updated DESC, rowid DESC")]
 
     def open_runs(self):
         rows = self.db.execute("SELECT * FROM runs WHERE state = 'open' ORDER BY updated DESC")

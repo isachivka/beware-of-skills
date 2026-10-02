@@ -164,3 +164,12 @@ def test_step_summary_is_optional(cfg):
     repo = config.load_repo(REPO)
     assert repo.steps["eyeball"].summary == "the human reads the PR"
     assert repo.steps["ci"].summary == ""
+
+
+def test_profile_repeat(cfg):
+    write(repo_dir(cfg) / "profiles" / "loop.md", "---\ndescription: d\nsteps: pr-draft, ci\nrepeat: true\n---\n")
+    write(repo_dir(cfg) / "profiles" / "bad.md", "---\ndescription: d\nsteps: ci\nrepeat: yes\n---\n")
+    repo = config.load_repo(REPO)
+    assert repo.profiles["loop"].repeat is True
+    assert repo.profiles["full"].repeat is False
+    assert any("repeat must be true or false" in e for e in repo.invalid["bad"])

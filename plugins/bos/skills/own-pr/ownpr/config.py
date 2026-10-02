@@ -75,6 +75,7 @@ class Profile:
     description: str
     steps: list
     source: str
+    repeat: bool = False
 
 
 @dataclass
@@ -124,8 +125,11 @@ def load_steps(directory):
 
 def load_profile(path):
     keys, _ = read_md(path)
-    check_keys(keys, ("description", "steps"), ("description", "steps"), path)
-    return Profile(stem(path), keys["description"], split_list(keys["steps"]), path)
+    check_keys(keys, ("description", "steps", "repeat"), ("description", "steps"), path)
+    repeat = keys.get("repeat", "false")
+    if repeat not in ("true", "false"):
+        raise ConfigError("%s: repeat must be true or false, got %r" % (path, repeat))
+    return Profile(stem(path), keys["description"], split_list(keys["steps"]), path, repeat == "true")
 
 
 def profile_errors(profile, steps):

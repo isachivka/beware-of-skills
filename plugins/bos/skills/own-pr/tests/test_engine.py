@@ -338,3 +338,38 @@ def test_plan_text_lists_the_human_steps_with_summaries(with_merge, cfg):
     lines = text.splitlines()
     assert lines[0].startswith("PLAN full: ▶pr-draft")
     assert lines[1:] == ["  eyeball[you]: the human reads the PR", "  review[you]", "  merge[you, wait]"]
+
+
+@pytest.fixture
+def loop(cfg, tmp_path):
+    write(repo_dir(cfg) / "profiles" / "loop.md",
+          "---\ndescription: d\nsteps: pr-draft, eyeball, ci\nrepeat: true\n---\n")
+    j = Journal(str(tmp_path / "state" / "own-pr.db"))
+    repo = config.load_repo(REPO)
+    rid = j.create_run(REPO, "develop", "/co", "loop", "explicit", repo.profiles["loop"].steps,
+                       identity={"claude": "c1", "agterm": "A1", "pane": "left"}, loop_id=None, iteration=1)
+    return j, repo, rid
+
+
+def test_next_iteration_closes_the_item_and_opens_a_new_one(loop):
+    j, repo, rid = loop
+    j.update_run(rid, pr_url="https://github.com/pdffiller/jsfiller/pull/9", pr_number=9,
+                 pr_branch="feature/w", mode_run="away")
+    finish(j, rid, "pr-draft", "eyeball", "ci")
+    j.claim("rc09", rid)
+    new = engine.next_iteration(j, repo, run(j, rid))
+    old = j.run(rid)
+    assert old["state"] == "closed" and j.claims() == []
+    assert (new["iteration"], new["loop_id"], new["profile"]) == (2, rid, "loop")
+    assert (new["pr_url"], new["pr_branch"]) == (None, None)
+    assert (new["claude_session"], new["agterm_session"], new["agterm_pane"], new["mode_run"]) == ("c1", "A1", "left", "away")
+    assert all(s["status"] == "pending" for s in j.steps(new["id"]).values())
+    finish(j, new["id"], "pr-draft", "eyeball", "ci")
+    third = engine.next_iteration(j, repo, j.run(new["id"]))
+    assert (third["iteration"], third["loop_id"]) == (3, rid)
+
+
+def test_next_iteration_needs_a_finished_item(loop):
+    j, repo, rid = loop
+    with pytest.raises(engine.RuleError, match="not finished"):
+        engine.next_iteration(j, repo, run(j, rid))

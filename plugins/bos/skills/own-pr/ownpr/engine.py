@@ -187,6 +187,26 @@ def switch_profile(journal, repo, run, name, by_human):
     return added, removed
 
 
+def next_iteration(journal, repo, run):
+    """Close a finished item of a repeating profile and open the next one in its place."""
+    order = profile_steps(repo, run)
+    states = journal.steps(run["id"])
+    unfinished = [s for s in order if states.get(s, {}).get("status") not in ("done", "skipped")]
+    if unfinished:
+        raise RuleError("run %s is not finished: %s" % (run["id"], ", ".join(unfinished)))
+    with journal.tx():
+        journal.close_run(run["id"])
+        new_id = journal.create_run(
+            run["repo"], run["branch"], run["checkout"], run["profile"], run["profile_by"], order,
+            origin=run["origin"], mode_env=run["mode_env"],
+            identity={"claude": run["claude_session"], "codex": run["codex_session"],
+                      "agterm": run["agterm_session"], "pane": run["agterm_pane"]},
+            loop_id=run["loop_id"] or run["id"], iteration=(run["iteration"] or 1) + 1)
+        if run["mode_run"]:
+            journal.update_run(new_id, mode_run=run["mode_run"])
+    return journal.run(new_id)
+
+
 def close(journal, run):
     busy = running_steps(journal, run)
     if busy:

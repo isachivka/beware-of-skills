@@ -270,6 +270,16 @@ Igor (e.g. `inspection`, `agent's review picks`), CI, last activity, session.
 
 Only `typing-wave` exists today (Igor, 2026-09-30); other profiles come when he writes them.
 
+## Repeating profiles
+
+`repeat: true` on a profile makes it a loop. When every step of an item is done or skipped,
+`own-pr next` closes that item and opens the next one in one transaction: same repo, branch,
+checkout, profile, origin, sessions and run-level mode, iteration + 1, linked by `loop_id`.
+The new item has no PR; `bind` records the PR and its head branch, so `own-pr` run from that
+branch's worktree finds the item too. Human steps still deferred keep the loop from moving on.
+Closed items stay in the journal; `prs log` lists them and `prs log <pr|run>` shows one item's
+steps. No goto: a loop restarts the whole profile.
+
 ## Waiting on the team
 
 `own-pr watch` polls the PR and exits when its state, review decision, reviews or comments

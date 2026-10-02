@@ -8,7 +8,7 @@ from . import config, engine
 
 FAILED = ("FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE")
 WAITING = ("", "PENDING", "QUEUED", "IN_PROGRESS", "EXPECTED", "WAITING", "REQUESTED")
-HEADERS = ("PR", "REPO", "TITLE", "PROFILE", "NOW", "OWED", "CI", "ACTIVE", "SESSION")
+HEADERS = ("PR", "REPO", "TITLE", "PROFILE", "ITER", "NOW", "OWED", "CI", "ACTIVE", "SESSION")
 
 
 def real_gh(args):
@@ -66,7 +66,7 @@ def short_repo(repo_id):
 
 
 def render(rows):
-    widths = [max(len(str(r[i])) for r in rows) for i in range(len(HEADERS))]
+    widths = [max(len(str(r[i])) for r in rows) for i in range(len(rows[0]))]
     return "\n".join("  ".join(str(c).ljust(w) for c, w in zip(r, widths)).rstrip() for r in rows)
 
 
@@ -87,7 +87,8 @@ def table(journal, gh):
         owed_label = ",".join(sorted({o["step"] or "other" for o in owed})) or "-"
         title = ((info or {}).get("title") or run["branch"])[:40]
         rows.append(("#%s" % run["pr_number"] if run["pr_number"] else "-",
-                     short_repo(run["repo"]), title, run["profile"], now, owed_label,
+                     short_repo(run["repo"]), title, run["profile"],
+                     str(run["iteration"]) if run["loop_id"] else "-", now, owed_label,
                      ci_summary((info or {}).get("statusCheckRollup")), ago(run["updated"]),
                      (run["agterm_session"] or "-")[:8]))
     out = [render(rows)] if len(rows) > 1 else ["No open own-pr runs."]
@@ -115,8 +116,8 @@ def owed_report(journal):
     return "\n".join(out) or "Nothing is waiting on you."
 
 
-def resolve(journal, target):
-    runs, t = journal.open_runs(), str(target).strip()
+def resolve(journal, target, runs=None):
+    runs, t = journal.open_runs() if runs is None else runs, str(target).strip()
     matches = [r for r in runs if t in (r["id"], r["pr_url"])]
     m = re.match(r"^(?:(?P<repo>[\w.-]+/[\w.-]+)#|#)?(?P<num>\d+)$", t)
     if not matches and m:
@@ -184,3 +185,30 @@ def notify(run, change, typer):
 def nudge(run, message, typer):
     text = "own-pr: %s %s. Run `own-pr next`.\n" % (run["pr_url"] or run["branch"], message)
     return typer(run["agterm_session"], run["agterm_pane"], text)
+
+
+def when(ts):
+    return time.strftime("%m-%d %H:%M", time.localtime(ts)) if ts else "-"
+
+
+def log(journal, target=None):
+    """Closed items newest first; with a target, one item's steps in order."""
+    if target:
+        run = resolve(journal, target, journal.all_runs())
+        head = "run %s  %s  %s  profile %s%s  %s" % (
+            run["id"], "#%s" % run["pr_number"] if run["pr_number"] else "-", run["branch"],
+            run["profile"], "  iteration %s" % run["iteration"] if run["loop_id"] else "",
+            run["state"])
+        rows = [("STEP", "STATUS", "BY", "WHEN", "EVIDENCE", "NOTE")]
+        for sid, st in journal.steps(run["id"]).items():
+            rows.append((sid, st["status"], st["by"] or "-", when(st["updated"]),
+                         st["evidence"] or "-", (st["note"] or "-")[:60]))
+        return head + "\n" + render(rows)
+    rows = [("CLOSED", "PR", "PROFILE", "ITER", "BRANCH", "STEPS")]
+    for run in journal.closed_runs():
+        steps = journal.steps(run["id"]).values()
+        finished = sum(1 for st in steps if st["status"] in ("done", "skipped"))
+        rows.append((when(run["updated"]), "#%s" % run["pr_number"] if run["pr_number"] else "-",
+                     run["profile"], str(run["iteration"]) if run["loop_id"] else "-",
+                     run["branch"][:40], "%d/%d done" % (finished, len(steps))))
+    return render(rows) if len(rows) > 1 else "No closed items yet."

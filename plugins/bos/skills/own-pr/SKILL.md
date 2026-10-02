@@ -38,6 +38,10 @@ Once the PR exists: `own-pr bind <pr-url>`.
 | `reconcile` | It is marked running (a long wait, or the session stopped mid-step): find out where it stands and record `done` or `failed` once it has ended. Start no other work of your own before that. |
 | `done` | Every step of the profile is finished. |
 
+A profile with `repeat: true` never ends: when an item is finished, `next` closes it, opens
+the next one (`ITERATION n started`) and hands you its first step. Just keep going; the new item
+has no PR until you `bind` one.
+
 ## The user's steps
 
 `own-pr start` and every `own-pr next` print a `PLAN` line: the whole profile, `▶` where you
@@ -75,6 +79,7 @@ Record these only when the user said them in this session:
 | `own-pr adopt <run>` | This session takes over a run another session started |
 | `own-pr close` | End the run |
 | `prs`, `prs owed`, `prs go <pr>` | Every PR in flight, what waits on the user, jump to the owning terminal |
+| `prs log [<pr>]` | Closed items, newest first; with a PR or run id, that item's steps |
 | `prs done\|skip <pr> <step>`, `prs away\|attended <pr>` | The user records their step or switches one PR's mode from their own terminal; a session waiting on it gets a nudge |
 
 ## Rules
