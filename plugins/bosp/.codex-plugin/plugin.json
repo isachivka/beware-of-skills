@@ -1,7 +1,7 @@
 {
   "name": "bosp",
   "version": "1.0.0",
-  "description": "Personal plugin bundle; currently empty.",
+  "description": "Personal integrations: codex-proxy, an OpenAI-compatible localhost endpoint on your Codex subscription.",
   "author": {
     "name": "Igor Sachivka",
     "url": "https://github.com/isachivka"
@@ -13,8 +13,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "beware-of-skills: personal",
-    "shortDescription": "Personal plugin bundle; currently empty.",
-    "longDescription": "A reserved bundle for personal integrations; it currently contains no skills.",
+    "shortDescription": "Personal integrations: codex-proxy.",
+    "longDescription": "Personal integrations. codex-proxy serves an OpenAI-compatible Chat Completions endpoint on localhost that runs on the ChatGPT/Codex subscription Codex CLI is logged in with, for apps that want an OpenAI API key.",
     "developerName": "Igor Sachivka",
     "category": "Productivity",
     "capabilities": ["Interactive"],

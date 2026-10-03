@@ -27,7 +27,7 @@ Requirements vary by skill and are listed per skill below; the agterm ones need
 ## Installation
 
 This repo is a Claude Code plugin marketplace. The plugin you want is **bos**; a second one,
-**bosp**, is a reserved slot for personal integrations and is empty.
+**bosp**, holds personal integrations — currently [codex-proxy](#codex-proxy).
 
 ```
 /plugin marketplace add isachivka/beware-of-skills
@@ -352,6 +352,37 @@ State is one SQLite file in `~/.local/state/own-pr/`. Python 3 stdlib, `gh`, `gi
 needs [agterm](https://github.com/umputun/agterm).
 
 **Triggers:** `/bos:own-pr`, "handle the PR", "own-pr", "what PRs are in flight".
+
+## Skills — `bosp`
+
+```
+/plugin install bosp@beware-of-skills
+```
+
+### codex-proxy
+
+An OpenAI-compatible endpoint on `http://127.0.0.1:8723/v1` that runs on the ChatGPT/Codex
+subscription Codex CLI is logged in with, for apps that only take a Base URL, an API key and a
+model id. Built for a dictation app's post-processing step: Russian speech with English terms
+goes in, `git push в main` instead of «гит пуш в мейн» comes out, in about two seconds on
+`gpt-6-luna`.
+
+It translates `/v1/chat/completions` to the Responses API of `chatgpt.com/backend-api/codex`,
+using the OAuth token from `~/.codex/auth.json`. When the token nears expiry it refreshes it and
+writes the rotated tokens back, so codex itself stays logged in. A local key and a Host check keep
+browser pages out.
+
+```
+codex-proxy install   # LaunchAgent, prints Base URL, key and default model
+codex-proxy try "открой пиар на гитхабе"
+codex-proxy status
+```
+
+Python 3 stdlib, macOS launchd, Codex CLI logged in with ChatGPT. This uses the subscription
+outside the Codex client, and OpenAI may change that backend at any time.
+
+**Triggers:** `/bosp:codex-proxy`, "use my Codex subscription in this app", "the app wants an
+OpenAI key".
 
 ## Contributing
 

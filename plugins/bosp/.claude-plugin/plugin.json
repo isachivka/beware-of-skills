@@ -1,7 +1,7 @@
 {
   "name": "bosp",
   "displayName": "beware-of-skills: personal",
-  "description": "Personal plugin bundle; currently empty.",
+  "description": "Personal integrations: codex-proxy, an OpenAI-compatible localhost endpoint on your Codex subscription.",
   "author": {
     "name": "Igor Sachivka",
     "url": "https://github.com/isachivka"

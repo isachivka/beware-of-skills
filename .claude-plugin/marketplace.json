@@ -14,7 +14,7 @@
     {
       "name": "bosp",
       "source": "./plugins/bosp",
-      "description": "Personal plugin bundle (currently empty)."
+      "description": "Personal integrations: codex-proxy, an OpenAI-compatible localhost endpoint on your Codex subscription."
     }
   ]
 }

@@ -1,0 +1,557 @@
+#!/usr/bin/env python3
+"""codex-proxy — an OpenAI-compatible Chat Completions endpoint on localhost that runs on
+your ChatGPT/Codex subscription instead of an API key.
+
+Codex CLI logged in with ChatGPT keeps an OAuth token in ~/.codex/auth.json. That token is
+not accepted by api.openai.com; it is accepted by the backend Codex itself talks to,
+https://chatgpt.com/backend-api/codex/responses, which speaks the Responses API (streaming
+only, store=false). This proxy translates:
+
+    POST /v1/chat/completions  ->  POST backend-api/codex/responses
+    GET  /v1/models            ->  GET  backend-api/codex/models
+
+system/developer messages become `instructions`, user/assistant messages become `input`.
+Text only: tools, images and sampling parameters are dropped.
+
+Auth: auth.json is re-read on every request, so a refresh done by codex itself is picked
+up. When the access token is about to expire (or the backend answers 401) the proxy
+refreshes it with the refresh token and writes the result back to auth.json atomically —
+refresh tokens rotate, so writing back is what keeps codex logged in.
+
+Local callers must send `Authorization: Bearer <key>` with the key from
+~/.config/codex-proxy/key (created by `install`). That and the Host check keep web pages in
+the browser from spending the subscription through 127.0.0.1.
+
+Commands:
+    codex-proxy serve [--port N] [--model M] [--effort E]
+    codex-proxy install [--port N] [--model M] [--effort E]   LaunchAgent, always running
+    codex-proxy uninstall
+    codex-proxy status
+    codex-proxy key
+    codex-proxy try [TEXT]
+"""
+import argparse
+import base64
+import fcntl
+import json
+import os
+import plistlib
+import secrets
+import shutil
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import urllib.error
+import urllib.request
+import uuid
+from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+BACKEND = "https://chatgpt.com/backend-api/codex"
+TOKEN_URL = "https://auth.openai.com/oauth/token"
+CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"  # Codex CLI's public OAuth client id
+AUTH_PATH = os.path.expanduser(os.environ.get("CODEX_HOME", "~/.codex") + "/auth.json")
+KEY_PATH = os.path.expanduser("~/.config/codex-proxy/key")
+LABEL = "local.codex-proxy"
+PLIST_PATH = os.path.expanduser("~/Library/LaunchAgents/%s.plist" % LABEL)
+LOG_PATH = os.path.expanduser("~/Library/Logs/codex-proxy.log")
+
+DEFAULT_PORT = 8723
+DEFAULT_MODEL = "gpt-6-luna"
+DEFAULT_EFFORT = "low"
+REFRESH_MARGIN = 300  # seconds before expiry
+MODELS_TTL = 3600
+
+log_lock = threading.Lock()
+
+
+def log(msg):
+    with log_lock:
+        sys.stderr.write("%s %s\n" % (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), msg))
+        sys.stderr.flush()
+
+
+def codex_version():
+    try:
+        out = subprocess.run(["codex", "--version"], capture_output=True, text=True, timeout=10).stdout
+        return out.strip().split()[-1]
+    except Exception:
+        return "0.0.0"
+
+
+# ---------------------------------------------------------------- auth.json
+
+
+def jwt_exp(token):
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        return json.loads(base64.urlsafe_b64decode(payload)).get("exp", 0)
+    except Exception:
+        return 0
+
+
+def read_auth(path=AUTH_PATH):
+    with open(path) as f:
+        auth = json.load(f)
+    tokens = auth.get("tokens") or {}
+    if not tokens.get("access_token") or not tokens.get("refresh_token"):
+        raise RuntimeError("%s has no ChatGPT tokens — run `codex login` with ChatGPT" % path)
+    return auth
+
+
+def write_auth(auth, path=AUTH_PATH):
+    d = os.path.dirname(path)
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".auth.json.")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(auth, f, indent=2)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except BaseException:
+        os.unlink(tmp)
+        raise
+
+
+def post_token(refresh_token):
+    body = json.dumps({"client_id": CLIENT_ID, "grant_type": "refresh_token",
+                       "refresh_token": refresh_token, "scope": "openid profile email"}).encode()
+    req = urllib.request.Request(TOKEN_URL, data=body, method="POST",
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.load(r)
+
+
+def refresh_auth(stale_access, path=AUTH_PATH, post=post_token):
+    """Refresh unless someone (codex, another request) already replaced `stale_access`."""
+    with open(path + ".codex-proxy.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        auth = read_auth(path)
+        if auth["tokens"]["access_token"] != stale_access:
+            return auth
+        got = post(auth["tokens"]["refresh_token"])
+        for k in ("id_token", "access_token", "refresh_token"):
+            if got.get(k):
+                auth["tokens"][k] = got[k]
+        auth["last_refresh"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        write_auth(auth, path)
+        log("refreshed access token, valid until %s"
+            % datetime.fromtimestamp(jwt_exp(auth["tokens"]["access_token"])).isoformat())
+        return auth
+
+
+def current_tokens(path=AUTH_PATH):
+    auth = read_auth(path)
+    t = auth["tokens"]
+    if jwt_exp(t["access_token"]) - time.time() < REFRESH_MARGIN:
+        t = refresh_auth(t["access_token"], path)["tokens"]
+    return t
+
+
+# ---------------------------------------------------------------- translation
+
+
+def text_of(content):
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    return "".join(p.get("text", "") for p in content
+                   if isinstance(p, dict) and p.get("type") in ("text", "input_text", "output_text"))
+
+
+def to_responses(chat, default_model, default_effort):
+    instructions, items = [], []
+    for m in chat.get("messages") or []:
+        role, text = m.get("role"), text_of(m.get("content"))
+        if role in ("system", "developer"):
+            instructions.append(text)
+        elif role == "user":
+            items.append({"type": "message", "role": "user",
+                          "content": [{"type": "input_text", "text": text}]})
+        elif role == "assistant" and text:
+            items.append({"type": "message", "role": "assistant",
+                          "content": [{"type": "output_text", "text": text}]})
+    if not items:
+        # a prompt sent as a lone system message: let it be the input
+        items = [{"type": "message", "role": "user",
+                  "content": [{"type": "input_text", "text": "\n\n".join(instructions)}]}]
+        instructions = []
+    return {
+        "model": chat.get("model") or default_model,
+        "instructions": "\n\n".join(instructions),
+        "input": items,
+        "tools": [],
+        "tool_choice": "auto",
+        "parallel_tool_calls": False,
+        "reasoning": {"effort": chat.get("reasoning_effort") or default_effort},
+        "store": False,
+        "stream": True,
+        "include": [],
+    }
+
+
+def sse_events(lines):
+    for raw in lines:
+        line = raw.decode("utf-8", "replace").strip() if isinstance(raw, bytes) else raw.strip()
+        if line.startswith("data:"):
+            data = line[5:].strip()
+            if data and data != "[DONE]":
+                yield json.loads(data)
+
+
+def chat_usage(u):
+    if not u:
+        return None
+    return {"prompt_tokens": u.get("input_tokens", 0), "completion_tokens": u.get("output_tokens", 0),
+            "total_tokens": u.get("total_tokens", 0)}
+
+
+class UpstreamError(Exception):
+    def __init__(self, status, message):
+        super().__init__(message)
+        self.status = status
+
+
+def text_stream(events):
+    """Yield ("delta", str) for each text delta, then ("done", usage)."""
+    for ev in events:
+        t = ev.get("type")
+        if t == "response.output_text.delta":
+            yield "delta", ev.get("delta", "")
+        elif t == "response.completed":
+            yield "done", chat_usage((ev.get("response") or {}).get("usage"))
+            return
+        elif t in ("response.failed", "response.incomplete", "error"):
+            r = ev.get("response") or {}
+            err = r.get("error") or ev.get("error") or r.get("incomplete_details") or ev
+            raise UpstreamError(502, json.dumps(err, ensure_ascii=False)[:500])
+    raise UpstreamError(502, "upstream stream ended without response.completed")
+
+
+# ---------------------------------------------------------------- backend
+
+
+class Backend:
+    def __init__(self, auth_path=AUTH_PATH):
+        self.auth_path = auth_path
+        self.version = codex_version()
+        self.models = None
+        self.models_at = 0
+
+    def _headers(self, t, extra=None):
+        h = {"Authorization": "Bearer " + t["access_token"],
+             "chatgpt-account-id": t.get("account_id", ""),
+             "originator": "codex_cli_rs",
+             "User-Agent": "codex_cli_rs/%s" % self.version}
+        h.update(extra or {})
+        return h
+
+    def _open(self, make_req, timeout):
+        t = current_tokens(self.auth_path)
+        try:
+            return urllib.request.urlopen(make_req(t), timeout=timeout)
+        except urllib.error.HTTPError as e:
+            if e.code != 401:
+                raise
+            t = refresh_auth(t["access_token"], self.auth_path)["tokens"]
+            return urllib.request.urlopen(make_req(t), timeout=timeout)
+
+    def responses(self, body):
+        data = json.dumps(body).encode()
+
+        def make(t):
+            return urllib.request.Request(
+                BACKEND + "/responses", data=data, method="POST",
+                headers=self._headers(t, {"Content-Type": "application/json",
+                                          "Accept": "text/event-stream",
+                                          "OpenAI-Beta": "responses=experimental",
+                                          "session_id": str(uuid.uuid4())}))
+        return self._open(make, timeout=120)
+
+    def model_ids(self):
+        if self.models is None or time.time() - self.models_at > MODELS_TTL:
+            url = BACKEND + "/models?client_version=" + self.version
+            with self._open(lambda t: urllib.request.Request(url, headers=self._headers(t)), 30) as r:
+                d = json.load(r)
+            self.models = [m["slug"] for m in d.get("models", []) if m.get("visibility") == "list"]
+            self.models_at = time.time()
+        return self.models
+
+
+# ---------------------------------------------------------------- HTTP server
+
+
+class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    server_version = "codex-proxy"
+
+    def log_message(self, fmt, *args):
+        pass
+
+    def _json(self, status, obj):
+        body = json.dumps(obj, ensure_ascii=False).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _error(self, status, message, kind="invalid_request_error"):
+        self._json(status, {"error": {"message": message, "type": kind}})
+
+    def _allowed(self):
+        host = (self.headers.get("Host") or "").rsplit(":", 1)[0]
+        if host not in ("127.0.0.1", "localhost", "[::1]"):
+            self._error(403, "bad Host header")
+            return False
+        if self.headers.get("Authorization", "") != "Bearer " + self.server.key:
+            self._error(401, "wrong or missing API key; see `codex-proxy key`")
+            return False
+        return True
+
+    def do_GET(self):
+        path = self.path.split("?")[0].rstrip("/")
+        if path == "/health":
+            return self._json(200, {"ok": True})
+        if not self._allowed():
+            return
+        if path in ("/v1/models", "/models"):
+            try:
+                ids = self.server.backend.model_ids()
+            except Exception as e:
+                log("models: %s" % e)
+                ids = [self.server.default_model]
+            return self._json(200, {"object": "list", "data": [
+                {"id": i, "object": "model", "created": 0, "owned_by": "openai"} for i in ids]})
+        self._error(404, "not found")
+
+    def do_POST(self):
+        path = self.path.split("?")[0].rstrip("/")
+        if not self._allowed():
+            return
+        if path not in ("/v1/chat/completions", "/chat/completions"):
+            return self._error(404, "not found")
+        try:
+            chat = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)))
+        except Exception:
+            return self._error(400, "body is not JSON")
+        body = to_responses(chat, self.server.default_model, self.server.default_effort)
+        started = time.time()
+        try:
+            upstream = self.server.backend.responses(body)
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", "replace")[:1000]
+            log("upstream %s: %s" % (e.code, detail))
+            return self._error(e.code, "upstream: " + detail, "upstream_error")
+        except Exception as e:
+            log("upstream: %s" % e)
+            return self._error(502, "upstream: %s" % e, "upstream_error")
+        with upstream:
+            stream = text_stream(sse_events(upstream))
+            if chat.get("stream"):
+                self._stream(chat, body["model"], stream)
+            else:
+                self._complete(body["model"], stream)
+        log("%s %s %.2fs" % (body["model"], body["reasoning"]["effort"], time.time() - started))
+
+    def _complete(self, model, stream):
+        text, usage = [], None
+        try:
+            for kind, val in stream:
+                if kind == "delta":
+                    text.append(val)
+                else:
+                    usage = val
+        except UpstreamError as e:
+            log("upstream: %s" % e)
+            return self._error(e.status, "upstream: %s" % e, "upstream_error")
+        self._json(200, {
+            "id": "chatcmpl-" + uuid.uuid4().hex, "object": "chat.completion",
+            "created": int(time.time()), "model": model,
+            "choices": [{"index": 0, "finish_reason": "stop",
+                         "message": {"role": "assistant", "content": "".join(text)}}],
+            "usage": usage})
+
+    def _stream(self, chat, model, stream):
+        cid, created = "chatcmpl-" + uuid.uuid4().hex, int(time.time())
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.close_connection = True
+
+        def chunk(delta, finish=None, usage=None):
+            c = {"id": cid, "object": "chat.completion.chunk", "created": created, "model": model,
+                 "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}
+            if usage is not None:
+                c["usage"] = usage
+            self.wfile.write(b"data: " + json.dumps(c, ensure_ascii=False).encode() + b"\n\n")
+            self.wfile.flush()
+
+        chunk({"role": "assistant", "content": ""})
+        try:
+            for kind, val in stream:
+                if kind == "delta":
+                    chunk({"content": val})
+                else:
+                    want_usage = (chat.get("stream_options") or {}).get("include_usage")
+                    chunk({}, "stop", val if want_usage else None)
+        except UpstreamError as e:
+            log("upstream: %s" % e)
+            err = {"error": {"message": "upstream: %s" % e, "type": "upstream_error"}}
+            self.wfile.write(b"data: " + json.dumps(err).encode() + b"\n\n")
+        self.wfile.write(b"data: [DONE]\n\n")
+        self.wfile.flush()
+
+
+def load_key(create=False):
+    if not os.path.exists(KEY_PATH):
+        if not create:
+            raise SystemExit("no key at %s — run `codex-proxy install`" % KEY_PATH)
+        os.makedirs(os.path.dirname(KEY_PATH), exist_ok=True)
+        fd = os.open(KEY_PATH, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write("cxp-" + secrets.token_urlsafe(24) + "\n")
+    with open(KEY_PATH) as f:
+        return f.read().strip()
+
+
+def serve(args):
+    read_auth()  # fail fast when codex is not logged in with ChatGPT
+    srv = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    srv.daemon_threads = True
+    srv.key = load_key(create=True)
+    srv.backend = Backend()
+    srv.default_model, srv.default_effort = args.model, args.effort
+    log("listening on http://127.0.0.1:%d/v1 (default %s/%s)" % (args.port, args.model, args.effort))
+    srv.serve_forever()
+
+
+# ---------------------------------------------------------------- launchd
+
+
+def launchctl(*a):
+    return subprocess.run(["launchctl", *a], capture_output=True, text=True)
+
+
+def install(args):
+    key = load_key(create=True)
+    script = os.path.realpath(__file__)
+    # the system interpreter outlives pyenv/brew upgrades; the script needs only the stdlib
+    python = "/usr/bin/python3" if os.path.exists("/usr/bin/python3") else sys.executable
+    codex = shutil.which("codex")
+    path = ":".join(([os.path.dirname(codex)] if codex else []) + ["/usr/bin", "/bin"])
+    plist = {
+        "Label": LABEL,
+        "ProgramArguments": [python, script, "serve", "--port", str(args.port),
+                             "--model", args.model, "--effort", args.effort],
+        "RunAtLoad": True,
+        "KeepAlive": True,
+        "StandardOutPath": LOG_PATH,
+        "StandardErrorPath": LOG_PATH,
+        # `codex --version` for the User-Agent; launchd's PATH is minimal
+        "EnvironmentVariables": {"PATH": path},
+    }
+    os.makedirs(os.path.dirname(PLIST_PATH), exist_ok=True)
+    with open(PLIST_PATH, "wb") as f:
+        plistlib.dump(plist, f)
+    domain = "gui/%d" % os.getuid()
+    launchctl("bootout", domain + "/" + LABEL)
+    r = launchctl("bootstrap", domain, PLIST_PATH)
+    if r.returncode != 0:
+        raise SystemExit("launchctl bootstrap failed: %s" % (r.stderr or r.stdout).strip())
+    for _ in range(50):
+        if health(args.port):
+            break
+        time.sleep(0.1)
+    else:
+        raise SystemExit("installed, but nothing answers on :%d — see %s" % (args.port, LOG_PATH))
+    print("codex-proxy running: %s -> %s" % (PLIST_PATH, script))
+    print("  Base URL : http://127.0.0.1:%d/v1" % args.port)
+    print("  API key  : %s" % key)
+    print("  Model    : %s (any slug from /v1/models)" % args.model)
+    print("  Log      : %s" % LOG_PATH)
+
+
+def uninstall(_args):
+    launchctl("bootout", "gui/%d/%s" % (os.getuid(), LABEL))
+    if os.path.exists(PLIST_PATH):
+        os.remove(PLIST_PATH)
+    print("removed %s (key kept at %s)" % (LABEL, KEY_PATH))
+
+
+def health(port):
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:%d/health" % port, timeout=2) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
+def installed_port():
+    try:
+        with open(PLIST_PATH, "rb") as f:
+            a = plistlib.load(f)["ProgramArguments"]
+        return int(a[a.index("--port") + 1])
+    except Exception:
+        return DEFAULT_PORT
+
+
+def status(_args):
+    port = installed_port()
+    print("launchd  : %s" % ("loaded" if launchctl("print", "gui/%d/%s" % (os.getuid(), LABEL)).returncode == 0
+                             else "not loaded"))
+    print("listening: %s on :%d" % ("yes" if health(port) else "no", port))
+    try:
+        t = read_auth()["tokens"]
+        left = (jwt_exp(t["access_token"]) - time.time()) / 3600
+        print("token    : valid for %.1fh more (refreshed automatically)" % left)
+    except Exception as e:
+        print("token    : %s" % e)
+
+
+def try_it(args):
+    port = installed_port()
+    body = {"model": args.model, "messages": [
+        {"role": "system", "content": "Clean up this speech transcript. Write English tech terms "
+                                      "in Latin script. Return only the cleaned text."},
+        {"role": "user", "content": args.text}]}
+    req = urllib.request.Request("http://127.0.0.1:%d/v1/chat/completions" % port,
+                                 data=json.dumps(body).encode(), method="POST",
+                                 headers={"Content-Type": "application/json",
+                                          "Authorization": "Bearer " + load_key()})
+    t0 = time.time()
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            out = json.load(r)
+    except urllib.error.HTTPError as e:
+        raise SystemExit("HTTP %d: %s" % (e.code, e.read().decode()))
+    print(out["choices"][0]["message"]["content"])
+    print("(%s, %.2fs)" % (out["model"], time.time() - t0), file=sys.stderr)
+
+
+def main():
+    p = argparse.ArgumentParser(prog="codex-proxy", description=__doc__.split("\n\n")[0])
+    sub = p.add_subparsers(dest="cmd", required=True)
+    for name in ("serve", "install"):
+        s = sub.add_parser(name)
+        s.add_argument("--port", type=int, default=DEFAULT_PORT)
+        s.add_argument("--model", default=DEFAULT_MODEL, help="used when a request names none")
+        s.add_argument("--effort", default=DEFAULT_EFFORT, help="reasoning effort when a request sets none")
+    sub.add_parser("uninstall")
+    sub.add_parser("status")
+    sub.add_parser("key")
+    t = sub.add_parser("try")
+    t.add_argument("text", nargs="?", default="ну короче эм открой пиар на гитхабе и сделай ребейз на мейн")
+    t.add_argument("--model", default="")
+    a = p.parse_args()
+    {"serve": serve, "install": install, "uninstall": uninstall, "status": status,
+     "key": lambda _a: print(load_key()), "try": try_it}[a.cmd](a)
+
+
+if __name__ == "__main__":
+    main()
