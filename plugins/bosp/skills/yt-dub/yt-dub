@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+"""yt-dub — a YouTube video with Yandex's Russian voice-over, of any length, muxed into the best
+video YouTube serves, optionally copied into Plex over SSH.
+
+Yandex's video translation (the same one Yandex Browser and the voice-over-translation userscript
+use) refuses videos longer than 4 hours. So the video is fetched in 360p, cut into parts under the
+limit, each part is served from this Mac through a Cloudflare quick tunnel and translated by
+`vot-cli` from its public URL, and the per-part mp3s are glued back together. The voice-over is
+then mixed over the original sound at --orig-volume and muxed with the best video stream; the
+original sound stays as a second track.
+
+YouTube asks yt-dlp to sign in ("confirm you're not a bot"), so cookies are read from a local
+browser. yt-dlp has no Arc on macOS; Arc is Chromium with its own keychain item, handled here.
+
+Every step leaves its output in ~/Library/Caches/yt-dub/<video id>/ and is skipped when that
+output exists, so a rerun after a failure resumes. The cache is removed after success.
+
+    yt-dub URL [--out DIR] [--lang en] [--reslang ru] [--browser arc] [--orig-volume 0.2]
+               [--plex user@host:/dir --ssh-key KEY] [--keep]
+"""
+import argparse
+import glob
+import json
+import math
+import os
+import re
+import shlex
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.request
+
+LIMIT = 4 * 3600 - 600  # Yandex refuses > 4 h; keep 10 min of margin
+VOT = "vot-cli@2.1.0"
+ISO3 = {"ru": "rus", "en": "eng", "kk": "kaz"}
+
+
+def log(msg):
+    print(time.strftime("%H:%M:%S"), msg, file=sys.stderr, flush=True)
+
+
+def plan(duration, limit=LIMIT):
+    """(start, length) of equal parts, each under the limit."""
+    n = max(1, math.ceil(duration / limit))
+    step = math.ceil(duration / n)
+    return [(i * step, min(step, duration - i * step)) for i in range(n)]
+
+
+def safe_name(title):
+    return re.sub(r'[/\\:*?"<>|]+', " ", title).strip()[:150]
+
+
+def run(*cmd, **kw):
+    return subprocess.run(cmd, check=True, **kw)
+
+
+def export_cookies(browser, path):
+    import yt_dlp.cookies as c  # the python yt-dlp runs on
+
+    name, _, profile = browser.partition(":")
+    if name == "arc":
+        orig = c._get_chromium_based_browser_settings
+
+        def arc(_):
+            s = orig("chrome")
+            s["keyring_name"] = "Arc"
+            s["browser_dir"] = os.path.expanduser("~/Library/Application Support/Arc/User Data")
+            return s
+
+        c._get_chromium_based_browser_settings = arc
+        name = "chrome"
+    jar = c.extract_cookies_from_browser(name, profile or None)
+    if not any(k.name == "LOGIN_INFO" and k.domain.endswith("youtube.com") for k in jar):
+        sys.exit(f"no YouTube login in {browser} cookies; pick another --browser [name:profile]")
+    jar.filename = path
+    jar.save(ignore_discard=True, ignore_expires=True)
+    os.chmod(path, 0o600)
+
+
+def ytdlp(cookies, *args, **kw):
+    return run("yt-dlp", "--no-update", "-q", "--no-progress", "--no-warnings",
+               "--cookies", cookies, *args, **kw)
+
+
+def free_port():
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def open_tunnel(work, serve_dir, probe):
+    """http.server + cloudflared quick tunnel; returns (public base URL, processes)."""
+    port = free_port()
+    srv = subprocess.Popen([sys.executable, "-m", "http.server", str(port), "--bind", "127.0.0.1",
+                            "-d", serve_dir], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    cf_log = open(os.path.join(work, "cloudflared.log"), "w")
+    cf = subprocess.Popen(["cloudflared", "tunnel", "--no-autoupdate", "--url",
+                           f"http://127.0.0.1:{port}"], stdout=cf_log, stderr=cf_log)
+    procs = [srv, cf]
+    for _ in range(120):
+        m = re.search(r"https://[a-z0-9-]+\.trycloudflare\.com", open(cf_log.name).read())
+        if m:
+            try:  # DNS for a fresh quick tunnel takes a few seconds
+                urllib.request.urlopen(urllib.request.Request(f"{m[0]}/{probe}", method="HEAD"),
+                                       timeout=10)
+                return m[0], procs
+            except OSError:
+                pass
+        time.sleep(1)
+    for p in procs:
+        p.terminate()
+    sys.exit(f"cloudflared tunnel did not come up, see {cf_log.name}")
+
+
+def vot(url, outdir, outfile, lang, reslang):
+    r = subprocess.run(["npx", "-y", VOT, "--json", "--no-title", f"--lang={lang}",
+                        f"--reslang={reslang}", f"--outdir={outdir}", f"--outfile={outfile}", url],
+                       capture_output=True, text=True)
+    line = next((l for l in reversed(r.stdout.splitlines()) if l.startswith("{")), "{}")
+    res = (json.loads(line).get("results") or [{}])[0]
+    if res.get("status") != "success":
+        sys.exit(f"Yandex did not translate {url}: {res.get('error') or r.stderr[-500:]}")
+    return res["outputPath"]
+
+
+def to_plex(path, dest, ssh_key, container):
+    host, _, root = dest.partition(":")
+    ctl = "/tmp/yt-dub-ssh-%C"  # $TMPDIR overflows the 104-byte socket path limit
+    ssh = ["ssh", "-o", f"ControlPath={ctl}", "-o", "ControlMaster=auto", "-o",
+           "ControlPersist=10m"] + (["-i", os.path.expanduser(ssh_key)] if ssh_key else [])
+    name = os.path.basename(path)
+    folder = f"{root.rstrip('/')}/{os.path.splitext(name)[0]}"
+    tmp = f"{root.rstrip('/')}/.yt-dub.part"
+    q = shlex.quote
+    try:
+        run(*ssh, host, f"mkdir -p {q(folder)}")
+        log(f"copying to {host}:{folder}")
+        run("scp", "-q", *ssh[1:], path, f"{host}:{tmp}")
+        run(*ssh, host, f"mv {q(tmp)} {q(folder + '/' + name)} && chown -R --reference={q(root)} "
+            f"{q(folder)} && chmod 2755 {q(folder)} && chmod 644 {q(folder + '/' + name)}")
+        # every library: the host path differs from the one Plex sees inside its container
+        refresh = f"""C={q(container)}
+T=$(docker exec "$C" cat "/config/Library/Application Support/Plex Media Server/Preferences.xml" \\
+  | grep -o 'PlexOnlineToken="[^"]*"' | cut -d'"' -f2)
+for k in $(curl -s "http://127.0.0.1:32400/library/sections?X-Plex-Token=$T" | grep -o 'key="[0-9]*"' | cut -d'"' -f2); do
+  curl -s -o /dev/null "http://127.0.0.1:32400/library/sections/$k/refresh?X-Plex-Token=$T"
+done"""
+        run(*ssh, host, "bash -s", input=refresh, text=True)
+        log("Plex libraries refreshing")
+    finally:
+        subprocess.run([*ssh, "-O", "exit", host], capture_output=True)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("url")
+    ap.add_argument("--out", default="~/Downloads")
+    ap.add_argument("--lang", default="en", help="source language")
+    ap.add_argument("--reslang", default="ru", choices=sorted(ISO3))
+    ap.add_argument("--browser", default="arc", help="cookies source, name[:profile]")
+    ap.add_argument("--orig-volume", type=float, default=0.2)
+    ap.add_argument("--plex", metavar="USER@HOST:/DIR", help="copy the result there and rescan Plex")
+    ap.add_argument("--ssh-key")
+    ap.add_argument("--plex-container", default="plex")
+    ap.add_argument("--keep", action="store_true", help="keep the cache after success")
+    a = ap.parse_args()
+
+    missing = [t for t in ("yt-dlp", "ffmpeg", "cloudflared", "npx") if not shutil.which(t)]
+    if missing:
+        sys.exit("missing: " + " ".join(missing) + " (brew install yt-dlp ffmpeg cloudflared node)")
+
+    fd, cookies = tempfile.mkstemp(prefix="yt-dub-cookies-")
+    os.close(fd)
+    procs = []
+    try:
+        export_cookies(a.browser, cookies)
+        info = json.loads(ytdlp(cookies, "-j", a.url, capture_output=True, text=True).stdout)
+        vid, dur, title = info["id"], int(info["duration"]), info["title"]
+        work = os.path.expanduser(f"~/Library/Caches/yt-dub/{vid}")
+        os.makedirs(os.path.join(work, "parts"), exist_ok=True)
+        parts = plan(dur)
+        log(f"{title} — {dur // 3600}:{dur // 60 % 60:02}:{dur % 60:02}, {len(parts)} part(s)")
+
+        ru = os.path.join(work, f"{a.reslang}.mp3")
+        if not os.path.exists(ru):
+            low = os.path.join(work, "low.mp4")
+            if not os.path.exists(low):
+                log("downloading 360p for translation")
+                ytdlp(cookies, "-f", "18/worst[ext=mp4][acodec!=none]", "-o", low + ".tmp", a.url)
+                os.rename(low + ".tmp", low)
+            mp3s = []
+            for i, (start, length) in enumerate(parts, 1):
+                mp4 = os.path.join(work, "parts", f"part{i}.mp4")
+                mp3s.append(os.path.join(work, f"part{i}.mp3"))
+                if not os.path.exists(mp3s[-1]) and not os.path.exists(mp4):
+                    run("ffmpeg", "-v", "error", "-y", "-ss", str(start), "-i", low, "-t", str(length),
+                        "-c", "copy", "-avoid_negative_ts", "make_zero", "-f", "mp4", mp4 + ".tmp")
+                    os.rename(mp4 + ".tmp", mp4)
+            todo = [i for i, m in enumerate(mp3s, 1) if not os.path.exists(m)]
+            if todo:
+                base, procs = open_tunnel(work, os.path.join(work, "parts"), f"part{todo[0]}.mp4")
+                for i in todo:
+                    log(f"Yandex translating part {i}/{len(parts)} (minutes to tens of minutes)")
+                    got = vot(f"{base}/part{i}.mp4", work, f"part{i}.tmp", a.lang, a.reslang)
+                    os.rename(got, mp3s[i - 1])
+                for p in procs:
+                    p.terminate()
+                procs = []
+            lst = os.path.join(work, "concat.txt")
+            with open(lst, "w") as f:
+                f.writelines(f"file '{m}'\n" for m in mp3s)
+            run("ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy",
+                "-f", "mp3", ru + ".tmp")
+            os.rename(ru + ".tmp", ru)
+
+        video = glob.glob(os.path.join(work, "video.*"))
+        if not video:
+            log("downloading best video")
+            # h264 when YouTube tops out at 1080p (plays everywhere), else the best 4K stream
+            ytdlp(cookies, "-f", "bv*[height>1080]/bv*[vcodec^=avc1]/bv*", "-o",
+                  os.path.join(work, "video.%(ext)s"), a.url)
+            video = glob.glob(os.path.join(work, "video.*"))
+        orig = glob.glob(os.path.join(work, "orig.*"))
+        if not orig:
+            ytdlp(cookies, "-f", "ba[ext=m4a]/ba", "-o", os.path.join(work, "orig.%(ext)s"), a.url)
+            orig = glob.glob(os.path.join(work, "orig.*"))
+
+        out = os.path.join(os.path.expanduser(a.out), f"{safe_name(title)} ({a.reslang.upper()}).mp4")
+        log("muxing")
+        run("ffmpeg", "-v", "error", "-y", "-i", video[0], "-i", orig[0], "-i", ru, "-filter_complex",
+            f"[1:a]volume={a.orig_volume}[o];[2:a][o]amix=inputs=2:duration=first:normalize=0[mix]",
+            "-map", "0:v", "-map", "[mix]", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+            "-metadata:s:a:0", f"language={ISO3[a.reslang]}",
+            "-metadata:s:a:0", f"title={a.reslang.upper()} (Yandex)",
+            "-metadata:s:a:1", "title=Original", "-disposition:a:0", "default",
+            "-disposition:a:1", "0", "-movflags", "+faststart", "-f", "mp4", out + ".tmp")
+        os.rename(out + ".tmp", out)
+        log(f"done: {out}")
+        if a.plex:
+            to_plex(out, a.plex, a.ssh_key, a.plex_container)
+        if not a.keep:
+            shutil.rmtree(work)
+        print(out)
+    finally:
+        for p in procs:
+            p.terminate()
+        os.remove(cookies)
+
+
+if __name__ == "__main__":
+    main()

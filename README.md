@@ -27,7 +27,7 @@ Requirements vary by skill and are listed per skill below; the agterm ones need
 ## Installation
 
 This repo is a Claude Code plugin marketplace. The plugin you want is **bos**; a second one,
-**bosp**, holds personal integrations — currently [codex-proxy](#codex-proxy).
+**bosp**, holds personal integrations — [codex-proxy](#codex-proxy) and [yt-dub](#yt-dub).
 
 ```
 /plugin marketplace add isachivka/beware-of-skills
@@ -383,6 +383,25 @@ outside the Codex client, and OpenAI may change that backend at any time.
 
 **Triggers:** `/bosp:codex-proxy`, "use my Codex subscription in this app", "the app wants an
 OpenAI key".
+
+### yt-dub
+
+A YouTube video with Yandex's Russian voice-over at any length, muxed into the best video YouTube
+serves. Yandex refuses videos over 4 hours, so `yt-dub` cuts a 360p copy into parts under the
+limit, serves them through a Cloudflare quick tunnel, has `vot-cli` translate each part by URL and
+glues the audio back. The voice-over is mixed over the original sound; the original stays as a
+second track. `--plex user@host:/dir` copies the result to a Plex server over SSH and rescans it.
+
+```
+yt-dub https://www.youtube.com/watch?v=...          # → ~/Downloads/<title> (RU).mp4
+yt-dub URL --plex root@host:/media --ssh-key ~/.ssh/key
+```
+
+Each step is cached, so a failed run resumes. Needs yt-dlp, ffmpeg, cloudflared and node; YouTube
+cookies come from a local browser (Arc supported).
+
+**Triggers:** `/bosp:yt-dub`, "озвучь это видео на русском", "видео длиннее 4 часов", "закинь в
+plex".
 
 ## Contributing
 
