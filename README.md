@@ -18,7 +18,6 @@ and Codex CLI.
 | [memory-review](#memory-review)   | Turn an agent's memory pile into one annotatable document, apply your verdicts safely       |
 | [revdiff-ru](#revdiff-ru)         | Code review with everything but the code translated to Russian, line numbers intact         |
 | [decomment](#decomment)           | Strip the comments an agent left that just restate the code                                 |
-| [own-pr](#own-pr)                 | **alpha** — drive your own PR in the session that wrote it, by a process you edit as text     |
 
 Requirements vary by skill and are listed per skill below; the agterm ones need
 [agterm](https://github.com/umputun/agterm) on macOS, the review ones need
@@ -259,99 +258,6 @@ kept, which is where you correct its taste.
 
 **Triggers:** `/bos:decomment`, "remove the pointless comments", "the agent commented every
 line".
-
-### own-pr
-
-> **Alpha.** The CLI, config format and journal schema may still change without migration.
-
-Every agent flow that opens a pull request ends up inventing its own "what now": draft or
-ready, when to review, who to ping. own-pr takes that tail away from all of them. The session
-that did the work hands off to it and keeps driving the PR itself, so review feedback never
-has to move to another terminal.
-
-The process lives in `~/.config/own-pr/` as Markdown files with frontmatter, like skills.
-Edit a file and the next step of every PR in flight follows the new text. `own-pr next`
-hands the agent one step at a time with its instructions; `own-pr step` records what
-happened.
-
-```
-~/.config/own-pr/
-  config.md                                 mode: attended | away (machine default)
-  repos/github.com/acme/app/
-    profiles/feature.md                     which steps, in what order
-    steps/pr-open.md                        one file per step
-    steps/review.md
-    steps/merge.md
-  steps/                                    optional: steps shared by every repo
-  origins/<flow>.md                         optional: a flow's default profile and notes
-```
-
-A step is a few keys and the instruction the agent gets. Keep it short and point at the
-skill that does the work: `/skill | $skill` reads for both Claude Code and Codex.
-
-```markdown
----
-kind: human
-away: auto-pick
----
-Run /crit-review | $crit-review.
-
-Attended: once the human has made their picks in its revdiff, record done `--by-human`.
-Away: make the picks yourself and record done with `--note` listing what you took and why.
-```
-
-`kind` is `auto` (the agent does it) or `human`; an optional `summary:` line says in a few words what a
-human step means, and `own-pr next` lists it under the PLAN line. `away` says what a human step does while
-you are away: `defer` (skip it, owe it to you), `auto-pick` (the agent decides and owes you
-the decision) or `wait` (never skipped, e.g. merge). Auto steps take `away: run`.
-
-A profile is a description and an ordered list of steps. With `repeat: true` it is an endless
-loop: each pass is its own item, closed when its last step is done, and the next one opens with
-no PR until it binds one. `prs log` lists the closed items; `prs log 42` shows one item's steps.
-
-```markdown
----
-description: Types only, logic unchanged. Ready PR, no deploy, tests kept.
-steps: pr-open, decomment, ci, review, team-handoff, team-feedback, merge
----
-```
-
-The session that did the work then goes:
-
-```bash
-own-pr start --profile feature   # once per branch
-own-pr next                      # NEXT: do pr-open  (kind=auto, mode=attended) + the step text
-own-pr bind https://github.com/acme/app/pull/42
-own-pr step pr-open done --evidence https://github.com/acme/app/pull/42
-own-pr next                      # NEXT: do decomment ...
-own-pr step ci running           # before a long wait
-own-pr watch --notify --detach  # wait for reviews, comments, merge; a change is typed into this session
-```
-
-And you, from any terminal:
-
-```bash
-own-pr away             # I'm leaving: defer my steps, keep everything else moving
-prs                     # every PR in flight: step, what waits on me, CI, terminal
-prs owed                # what waits on me
-prs go 42               # jump to the terminal driving that PR
-prs done 42 eyeball     # I already looked at it (also ahead of time); a waiting session is nudged
-prs away 42             # this PR goes on without me
-prs log                 # closed items, newest first
-own-pr explain          # this checkout's resolved steps, with the file each came from
-```
-
-Every command has `--help` with the details.
-
-When you are away, every step runs except yours: those are deferred or decided by the agent,
-and pile up as owed items in `prs owed`. A step marked `away: wait` is never skipped: the
-pipeline stops there until you do it. The CLI knows no step by name; what a step means lives
-only in its file.
-
-State is one SQLite file in `~/.local/state/own-pr/`. Python 3 stdlib, `gh`, `git`; `prs go`
-needs [agterm](https://github.com/umputun/agterm).
-
-**Triggers:** `/bos:own-pr`, "handle the PR", "own-pr", "what PRs are in flight".
 
 ## Skills — `bosp`
 
