@@ -259,6 +259,13 @@ kept, which is where you correct its taste.
 **Triggers:** `/bos:decomment`, "remove the pointless comments", "the agent commented every
 line".
 
+### own-pr — moved
+
+own-pr used to live here: it drove your own PR from "the work is done" to merge, step by step,
+by a process kept as text. It grew into a project of its own:
+[agents-workflows](https://github.com/isachivka/agents-workflows) (flows), which runs such
+processes across agent sessions. The PR lifecycle is now a flows process there.
+
 ## Skills — `bosp`
 
 ```
