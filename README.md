@@ -13,6 +13,7 @@ and Codex CLI.
 | [peer-chat](#peer-chat)           | Claude Code and Codex talk to each other across a split pane                                 |
 | [agterm-backup](#agterm-backup)   | Reboot the Mac, get every running Claude/Codex session back resumed in its pane              |
 | [agterm-fork](#agterm-fork)       | Fork a live session into a sibling with the whole conversation                               |
+| [agterm-split-prs](#agterm-split-prs) | Hand each PR a session holds to a sibling session of its own, worktree and brief included   |
 | [agterm-restart](#agterm-restart) | Restart every running Claude in place, each resumed with its own flags                       |
 | [agterm-archive](#agterm-archive) | Park a whole workspace on disk, restore it later with every agent resumed                   |
 | [memory-review](#memory-review)   | Turn an agent's memory pile into one annotatable document, apply your verdicts safely       |
@@ -190,6 +191,25 @@ Works only inside agterm, and only alongside `agterm-backup`: a session cannot k
 claude id, so it is read from the live record that skill's hook writes.
 
 **Triggers:** `/bos:agterm-fork`, "fork this session", "continue this in a sibling tab".
+
+### agterm-split-prs
+
+One conversation ends up holding several PRs — an init across three repos, a fix and its
+follow-up — and anything per-PR (a flows run bound to the session, a review) wants one PR per
+session. This skill splits them out: a sibling session per PR, right after the current one, each
+in a worktree on the PR's branch, each running a fresh agent launched with this session's flags
+and a brief written from the conversation (what the PR does, what was decided, what is still
+open, what needs your go). The main checkout is never switched. The original session lets go of
+those PRs.
+
+```
+/bos:agterm-split-prs                     # every open PR in the conversation
+/bos:agterm-split-prs --flow ext-pr       # and start a flows run bound to each new session
+```
+
+Needs [agterm](https://github.com/umputun/agterm) and `gh`.
+
+**Triggers:** `/bos:agterm-split-prs`, "a session per PR", "split the PRs into sessions".
 
 ### agterm-restart
 
