@@ -19,6 +19,7 @@ and Codex CLI.
 | [memory-review](#memory-review)   | Turn an agent's memory pile into one annotatable document, apply your verdicts safely       |
 | [revdiff-ru](#revdiff-ru)         | Code review with everything but the code translated to Russian, line numbers intact         |
 | [decomment](#decomment)           | Strip the comments an agent left that just restate the code                                 |
+| [cleanup](#cleanup)               | Tidy up after yourself and close your own agterm session                                     |
 
 Requirements vary by skill and are listed per skill below; the agterm ones need
 [agterm](https://github.com/umputun/agterm) on macOS, the review ones need
@@ -278,6 +279,10 @@ kept, which is where you correct its taste.
 
 **Triggers:** `/bos:decomment`, "remove the pointless comments", "the agent commented every
 line".
+
+### cleanup
+
+`/bos:cleanup` — one line to the agent: «Приберись за собой и удались /agterm». Manual only.
 
 ### own-pr — moved
 
