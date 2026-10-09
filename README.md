@@ -282,7 +282,7 @@ line".
 
 ### cleanup
 
-`/bos:cleanup` — one line to the agent: «Приберись за собой и удались /agterm». Manual only.
+`/bos:cleanup` — one line to the agent: "Clean up after yourself and close your session /agterm". Manual only.
 
 ### own-pr — moved
 
