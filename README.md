@@ -290,7 +290,8 @@ an overlay. The user picks an option, can add a comment, and the answer comes ba
 exit 0 with `{"choice": [...], "note": "..."}`, either from Answer or when the page is closed
 after picking (every change is saved as a draft), or exit 3 if it was closed with nothing picked. The page follows the terminal theme.
 Inside agterm a PreToolUse hook (`plugins/bos/hooks/hooks.json`) denies AskUserQuestion and points
-the agent here; outside agterm it does nothing.
+the agent here; outside agterm it does nothing. To keep AskUserQuestion, set `"BOS_ASK_HOOK": "0"`
+under `env` in `~/.claude/settings.json`.
 
 ### cleanup
 

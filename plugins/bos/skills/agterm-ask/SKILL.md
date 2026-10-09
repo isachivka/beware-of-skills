@@ -16,7 +16,7 @@ allowed-tools: [Bash, Write]
 # agterm-ask
 
 Only inside agterm (`AGTERM_ENABLED=1`). Outside it, use AskUserQuestion. Inside it, bos's
-`hooks/hooks.json` denies AskUserQuestion and points here.
+`hooks/hooks.json` denies AskUserQuestion and points here (`BOS_ASK_HOOK=0` turns that off).
 
 1. Research first, so every option is concrete. Use whatever tools a good explanation needs:
    read the code, measure, run a benchmark, look up docs.

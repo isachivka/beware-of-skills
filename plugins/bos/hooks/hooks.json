@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ -n \"$AGTERM_SESSION_ID\" ] && printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Inside agterm, ask with the bos:agterm-ask skill (an HTML overlay with every option explained) instead of AskUserQuestion. If agterm-ask cannot open, ask in plain chat.\"}}' || true"
+            "command": "[ -n \"$AGTERM_SESSION_ID\" ] && [ \"$BOS_ASK_HOOK\" != 0 ] && printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Inside agterm, ask with the bos:agterm-ask skill (an HTML overlay with every option explained) instead of AskUserQuestion. If agterm-ask cannot open, ask in plain chat.\"}}' || true"
           }
         ]
       }
