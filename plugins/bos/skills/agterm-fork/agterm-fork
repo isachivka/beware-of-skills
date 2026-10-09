@@ -12,6 +12,7 @@ also carries the id in its argv, which is used as a fallback.
 """
 import argparse
 import json
+import re
 import os
 import shlex
 import shutil
@@ -198,7 +199,7 @@ def _answer_resume_prompt(sid, timeout=240, choice="2"):
             agtermctl("session", "type", "--target", sid, choice + "\n")
             print("  answered the resume prompt with %r" % choice)
             return True
-        if "esc to interrupt" in text or "\u276f " in text:
+        if "esc to interrupt" in text or re.search(r"^\u276f[ \xa0]", tail, re.M):
             return False
     return False
 
