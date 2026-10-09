@@ -68,11 +68,12 @@ footer button {{ font: inherit; font-weight: 600; padding: 0 22px; border: 0; bo
 <button type="submit">Answer</button></footer>
 </form>
 <script type="module">
-// every change is saved as a draft, so closing the page after picking still answers
+// the form is saved as a draft on load and every change, so closing the page after picking still answers
 const form = document.querySelector('form');
 const save = () => fetch('/draft', {{ method: 'POST', body: new URLSearchParams(new FormData(form)) }});
 form.addEventListener('change', save);
 form.addEventListener('input', save);
+save();  // a pre-checked default counts too
 if (document.querySelector('.mermaid')) {{
   const bg = getComputedStyle(document.body).backgroundColor.match(/\\d+/g) || [255, 255, 255];
   const dark = (0.299 * bg[0] + 0.587 * bg[1] + 0.114 * bg[2]) < 128;
