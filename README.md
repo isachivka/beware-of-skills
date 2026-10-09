@@ -20,6 +20,7 @@ and Codex CLI.
 | [revdiff-ru](#revdiff-ru)         | Code review with everything but the code translated to Russian, line numbers intact         |
 | [decomment](#decomment)           | Strip the comments an agent left that just restate the code                                 |
 | [cleanup](#cleanup)               | Tidy up after yourself and close your own agterm session                                     |
+| [agterm-ask](#agterm-ask)         | Ask a decision as a rich HTML page in an agterm overlay instead of AskUserQuestion           |
 
 Requirements vary by skill and are listed per skill below; the agterm ones need
 [agterm](https://github.com/umputun/agterm) on macOS, the review ones need
@@ -279,6 +280,17 @@ kept, which is where you correct its taste.
 
 **Triggers:** `/bos:decomment`, "remove the pointless comments", "the agent commented every
 line".
+
+### agterm-ask
+
+Replaces AskUserQuestion inside agterm. The agent writes an
+HTML fragment with one section per option (how it works, pros and cons, mermaid, charts, code,
+a comparison table). `agterm-ask body.html --title "…"` serves it on 127.0.0.1 and opens it in
+an overlay. The user picks an option, can add a comment, and the answer comes back as JSON on stdout:
+exit 0 with `{"choice": [...], "note": "..."}`, either from Answer or when the page is closed
+after picking (every change is saved as a draft), or exit 3 if it was closed with nothing picked. The page follows the terminal theme.
+Inside agterm a PreToolUse hook (`plugins/bos/hooks/hooks.json`) denies AskUserQuestion and points
+the agent here; outside agterm it does nothing.
 
 ### cleanup
 
