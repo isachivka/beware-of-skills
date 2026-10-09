@@ -284,13 +284,6 @@ line".
 
 `/bos:cleanup` — one line to the agent: "Clean up after yourself and close your session /agterm". Manual only.
 
-### own-pr — moved
-
-own-pr used to live here: it drove your own PR from "the work is done" to merge, step by step,
-by a process kept as text. It grew into a project of its own:
-[agents-workflows](https://github.com/isachivka/agents-workflows) (flows), which runs such
-processes across agent sessions. The PR lifecycle is now a flows process there.
-
 ## Skills — `bosp`
 
 ```
