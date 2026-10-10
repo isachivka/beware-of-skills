@@ -30,12 +30,17 @@ Only inside agterm (`AGTERM_ENABLED=1`). Outside it, use AskUserQuestion. Inside
    ```
 
    Add `--follow` only when the user is waiting on this question right now; otherwise the page
-   opens quietly on your session and they see it when they come back.
-4. End your turn. When the task notification arrives, read its stdout:
+   opens quietly on your session, with a desktop notification, and they see it when they come back.
+4. End your turn. In a flows step (your turn began with a `▶ flow:` line), first run
+   `flow wait --human --note "<the question>"`: a turn that ends without it counts as silent, and
+   flowd stops the run after the third. When the task notification arrives, read its stdout:
    - exit 0: `{"choice": ["b"], "note": "…"}` (Answer pressed, or closed after picking). `choice` lists the picked values; `note` is the
      free text (it can override or refine the choice, so read it). Act on it.
    - exit 3: `{"dismissed": true}`. They closed the page with nothing picked, so ask in chat
      what's wrong.
+   - exit 4: another overlay is open on your session. If it is a page you opened yourself, close
+     it (`agtermctl session overlay close --target "$AGTERM_SESSION_ID"`), ask again, and open your
+     page again after the answer. Otherwise ask in plain chat.
    - exit 2: the overlay didn't open. Ask in plain chat (bos denies AskUserQuestion inside agterm).
 
 ## The fragment
