@@ -105,17 +105,20 @@ class ScrolledComposerTests(unittest.TestCase):
         self.assertTrue(peer_chat.composer_has_expected_tail(content, sent + " [peer-check:0]", " I accept all seven points. [peer-check:0]", True))
 
 
-class LoneCombiningMarkTests(unittest.TestCase):
-    """A combining mark with no letter before it is not read back where it was typed."""
+class CombiningMarkTests(unittest.TestCase):
+    """Text with combining marks is drawn out of step with the cells the read-back counts."""
 
-    def test_lone_mark_gets_a_dotted_circle(self) -> None:
-        self.assertEqual(peer_chat.normalize(CODEX, 'a \u0301 b'), "Chat from Claude: a \u25cc\u0301 b")
-        self.assertEqual(peer_chat.normalize(CODEX, '\u0301x'), "Chat from Claude: \u25cc\u0301x")
-
-    def test_decomposed_letters_fold_and_spacing_marks_stay(self) -> None:
+    def test_marks_that_fold_are_folded(self) -> None:
         self.assertEqual(peer_chat.normalize(CODEX, "Cafe\u0301 I\u0307"), "Chat from Claude: Caf\u00e9 \u0130")
-        hindi = "\u0915\u093f\u0924\u093e\u092c"
-        self.assertEqual(peer_chat.normalize(CODEX, hindi), "Chat from Claude: " + hindi + "")
+
+    def test_marks_that_do_not_fold_are_written_out(self) -> None:
+        self.assertEqual(peer_chat.normalize(CLAUDE, "i\u0307stanbul"), "Chat from Codex: i\\u0307stanbul")
+        self.assertEqual(peer_chat.normalize(CODEX, "a \u0301 b"), "Chat from Claude: a \\u0301 b")
+        hindi = "\u0939\u093f\u0928\u094d\u0926\u0940"  # vowel signs and the virama are marks
+        self.assertEqual(peer_chat.normalize(CODEX, hindi), "Chat from Claude: \u0939\\u093f\u0928\\u094d\u0926\\u0940")
+
+    def test_plain_text_is_unchanged(self) -> None:
+        self.assertEqual(peer_chat.normalize(CODEX, "ёлка «x» 😀 中文"), "Chat from Claude: ёлка «x» 😀 中文")
 
 
 if __name__ == "__main__":

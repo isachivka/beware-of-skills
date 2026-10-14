@@ -14,8 +14,8 @@ allowed-tools: Bash, Read, Grep, Glob
 > a refusal quotes the last rows of the pane, because the bare reason lists four causes
 > and names none; the scroll arrow Codex draws on a composer taller than its box is not read
 > as text (every message past about 2.8 KB failed at chunk 15 otherwise); and a message is
-> NFC-folded, a lone combining mark getting the dotted circle it is drawn on (the read-back
-> missed a bare mark after a space). The earlier greyed-suggestion patch is gone: upstream now gates Claude
+> NFC-folded, any combining mark that does not fold written out as `\uXXXX` (both composers
+> draw marks a cell out of step, and the read-back then never matched). The earlier greyed-suggestion patch is gone: upstream now gates Claude
 > sends on the caret alone, and reads the Codex composer through its idle animation.
 >
 > The script is invoked as a bare `peer-chat.py` through `PATH`. Keep

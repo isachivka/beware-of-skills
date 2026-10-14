@@ -1262,20 +1262,20 @@ def normalize(profile: Profile, message: str) -> str:
 
 
 def carry_lone_marks(line: str) -> str:
-    """LOCAL PATCH (not upstream): fold what can fold, give a lone combining mark a base.
+    """LOCAL PATCH (not upstream): fold what can fold, spell out the combining marks that remain.
 
-    A combining mark with no letter before it (after a space, or first) is not drawn in the
-    cell the read-back expects: Codex's composer showed `"a  b"` for a typed `"a \u0301 b"`, the
-    chunk never confirmed, and the send stopped with half a message in the composer. NFC turns
-    decomposed letters into single characters; a mark still standing alone gets the dotted
-    circle U+25CC that fonts draw it on.
+    Both composers draw a combining mark out of step with the terminal cells the read-back
+    counts: Codex showed `"a  b"` for a typed `"a \\u0301 b"`, and Claude's composer, given
+    `i\\u0307stanbul`, drew the rest of the row a cell off (`special case` read back as
+    `specia  case`). The chunk never confirmed and the send stopped with half a message in the
+    composer; Devanagari vowel signs (spacing marks) shifted Claude's rows the same way. NFC
+    turns decomposed letters into single characters; any mark it cannot fold is written as
+    `\\uXXXX`, which the peer reads as well as the mark.
     """
-    out: list[str] = []
-    for char in unicodedata.normalize("NFC", line):
-        if unicodedata.category(char) in ("Mn", "Me") and (not out or out[-1].isspace()):
-            out.append("\u25cc")
-        out.append(char)
-    return "".join(out)
+    return "".join(
+        f"\\u{ord(char):04x}" if unicodedata.category(char).startswith("M") else char
+        for char in unicodedata.normalize("NFC", line)
+    )
 
 
 def raise_after_composer_dirty(
