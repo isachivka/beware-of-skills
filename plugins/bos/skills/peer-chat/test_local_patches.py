@@ -77,5 +77,46 @@ class PaneReachableTests(unittest.TestCase):
                 self.assertFalse(unhidden)
 
 
+class ScrolledComposerTests(unittest.TestCase):
+    """A long message scrolls Codex's composer, which marks its top row with an arrow."""
+
+    SCREEN = "\n".join([
+        "  Worked for 28s",
+        "",
+        "› rounds the font size and :241 takes the min y; :319 switches LH between one line\u2191",
+        "  and several. I accept all seven points. [peer-check:0]",
+        "",
+        "  GPT-6-Astra medium · ~/x",
+        "                                                         ⚠ 1 warning · f2 to view",
+    ])
+
+    def test_the_scroll_arrow_is_not_text(self) -> None:
+        self.assertEqual(
+            peer_chat.codex_live_prompt_text(self.SCREEN),
+            "rounds the font size and :241 takes the min y; :319 switches LH between one line\n"
+            "and several. I accept all seven points. [peer-check:0]",
+        )
+
+    def test_a_scrolled_tail_confirms_the_chunk(self) -> None:
+        sent = ("Earlier text that scrolled away. I checked: layout.ts:204 "
+                "rounds the font size and :241 takes the min y; :319 switches LH between one line "
+                "and several. I accept all seven points.")
+        content = peer_chat.codex_live_prompt_text(self.SCREEN)
+        self.assertTrue(peer_chat.composer_has_expected_tail(content, sent + " [peer-check:0]", " I accept all seven points. [peer-check:0]", True))
+
+
+class LoneCombiningMarkTests(unittest.TestCase):
+    """A combining mark with no letter before it is not read back where it was typed."""
+
+    def test_lone_mark_gets_a_dotted_circle(self) -> None:
+        self.assertEqual(peer_chat.normalize(CODEX, 'a \u0301 b'), "Chat from Claude: a \u25cc\u0301 b")
+        self.assertEqual(peer_chat.normalize(CODEX, '\u0301x'), "Chat from Claude: \u25cc\u0301x")
+
+    def test_decomposed_letters_fold_and_spacing_marks_stay(self) -> None:
+        self.assertEqual(peer_chat.normalize(CODEX, "Cafe\u0301 I\u0307"), "Chat from Claude: Caf\u00e9 \u0130")
+        hindi = "\u0915\u093f\u0924\u093e\u092c"
+        self.assertEqual(peer_chat.normalize(CODEX, hindi), "Chat from Claude: " + hindi + "")
+
+
 if __name__ == "__main__":
     unittest.main()

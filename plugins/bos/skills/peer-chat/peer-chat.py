@@ -56,6 +56,7 @@ CODEX_CHOICE_RE = re.compile(r"^\d+\.\s")
 # composer shows no animation and is compared verbatim.
 CODEX_PARTICLE_RE = re.compile(r"[\u2800-\u28FF]")
 CODEX_INDENT_RE = re.compile(r"^[\s\u2800-\u28FF]{0,2}")
+CODEX_SCROLL_ARROW_RE = re.compile(r"\s*[\u2191\u2193]$")  # LOCAL PATCH: see codex_live_prompt_text
 CODEX_EMPTY_PROMPT = "Ask Codex to do anything"
 # LOCAL PATCH (not upstream): a narrow pane truncates that placeholder — a 44-column split
 # renders `› Ask Codex to do any` — and a full match then reads it as somebody's draft and
@@ -672,6 +673,10 @@ def codex_live_prompt_text(text: str) -> str | None:
         match.group(1),
         *(CODEX_INDENT_RE.sub("", line).strip() for line in block[1:]),
     ]
+    # LOCAL PATCH (not upstream): a message taller than the composer scrolls it, and Codex
+    # marks the scrolled edge with an arrow drawn in the row's last cell. Read as text, it
+    # failed every send past about 2.8 KB (chunk 15 of 17 or 22), every time.
+    content = [CODEX_SCROLL_ARROW_RE.sub("", part) for part in content]
     return "\n".join(part for part in content if part)
 
 
@@ -1247,12 +1252,30 @@ def normalize(profile: Profile, message: str) -> str:
     line = " ".join(message.split())
     if any(unicodedata.category(char) == "Cc" for char in line):
         raise ValueError("chat message contains a control character")
+    line = carry_lone_marks(line)
     prefix = profile.label.strip()
     while line.lower().startswith(prefix.lower()):
         line = line[len(prefix) :].lstrip(": ").strip()
     if not line:
         raise ValueError("chat message is empty")
     return profile.label + line
+
+
+def carry_lone_marks(line: str) -> str:
+    """LOCAL PATCH (not upstream): fold what can fold, give a lone combining mark a base.
+
+    A combining mark with no letter before it (after a space, or first) is not drawn in the
+    cell the read-back expects: Codex's composer showed `"a  b"` for a typed `"a \u0301 b"`, the
+    chunk never confirmed, and the send stopped with half a message in the composer. NFC turns
+    decomposed letters into single characters; a mark still standing alone gets the dotted
+    circle U+25CC that fonts draw it on.
+    """
+    out: list[str] = []
+    for char in unicodedata.normalize("NFC", line):
+        if unicodedata.category(char) in ("Mn", "Me") and (not out or out[-1].isspace()):
+            out.append("\u25cc")
+        out.append(char)
+    return "".join(out)
 
 
 def raise_after_composer_dirty(
