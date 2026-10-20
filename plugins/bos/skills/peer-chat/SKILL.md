@@ -1,6 +1,6 @@
 ---
 name: peer-chat
-description: 'Hold a back-and-forth conversation with the Codex TUI running in the other pane of this agterm session''s split, as peers. Use when the user says "chat with codex", "talk to codex", "work with codex", "do this with codex", "build this with codex", "discuss this with codex", "ask codex what it thinks", or when a prompt arrives starting with "Chat from Codex:". Not for a one-shot task handed to codex, and not for a read-only second opinion.'
+description: 'A prompt starting with "Chat from Codex:" is a peer message: answer it only through peer-chat.py, never in your own output. Also use when the user says "chat with codex", "talk to codex", "work with codex", "do this with codex", "build this with codex", "discuss this with codex" (the agent in the other pane of this agterm split). Not for a one-shot task handed off, and not for a read-only second opinion.'
 allowed-tools: Bash, Read, Grep, Glob
 ---
 
@@ -15,7 +15,9 @@ allowed-tools: Bash, Read, Grep, Glob
 > and names none; the scroll arrow Codex draws on a composer taller than its box is not read
 > as text (every message past about 2.8 KB failed at chunk 15 otherwise); and a message is
 > NFC-folded, any combining mark that does not fold written out as `\uXXXX` (both composers
-> draw marks a cell out of step, and the read-back then never matched). The earlier greyed-suggestion patch is gone: upstream now gates Claude
+> draw marks a cell out of step, and the read-back then never matched). The `description` leads
+> with the `Chat from` trigger, because Codex 0.16x cuts each listed description at about 156
+> characters and the trigger at the end was lost, so Codex answered in its own output. The earlier greyed-suggestion patch is gone: upstream now gates Claude
 > sends on the caret alone, and reads the Codex composer through its idle animation.
 >
 > The script is invoked as a bare `peer-chat.py` through `PATH`. Keep
