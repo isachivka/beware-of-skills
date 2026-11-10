@@ -44,7 +44,9 @@ Workspace archives live in `~/.agterm-backup/archives/<name>.json`, single sessi
 - `archive` records every session's name, cwd, title, order, split (axis + ratio) and, per pane,
   the claude session id plus its launch flags. Then `agtermctl workspace delete`. It refuses
   to archive the workspace it is running in — that would kill the caller — and warns when a
-  claude pane has no captured id. `--keep` snapshots without closing, `--force` overwrites.
+  claude pane has no captured id. `--keep` snapshots without closing. A name that is already
+  archived is saved as `<name>_1`, `_2`, … (the restored workspace or session keeps its
+  original name); `--force` overwrites instead.
 - `session` archives one session out of a workspace the same way, and remembers which
   workspace it came from. `restore` puts it back there, creating the workspace if it is
   gone. Same refusal to close the session it is running in, same `--keep`/`--force`.

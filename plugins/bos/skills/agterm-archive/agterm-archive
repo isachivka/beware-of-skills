@@ -273,6 +273,18 @@ def session_path(wsname, name):
     return os.path.join(SESSION_DIR, "%s--%s.json" % (slug(wsname or "?"), slug(name or "session")))
 
 
+def free_path(path, force=False):
+    """`path`, or `<stem>_1.json`, `_2`, ... when it is taken (unless `force`), plus the
+    suffix used. exists() follows the filesystem, so on case-insensitive APFS `Main--vpn`
+    collides with an older `main--vpn` and gets a suffix instead of failing."""
+    if force or not os.path.exists(path):
+        return path, ""
+    stem, n = path[:-len(".json")], 1
+    while os.path.exists("%s_%d.json" % (stem, n)):
+        n += 1
+    return "%s_%d.json" % (stem, n), "_%d" % n
+
+
 def iter_archives():
     """(kind, label, path, data) for every archive on disk."""
     for d, kind in ((ARCHIVE_DIR, "workspace"), (SESSION_DIR, "session")):
@@ -288,17 +300,19 @@ def iter_archives():
             except Exception:
                 continue
             if kind == "workspace":
-                label = data.get("workspace") or fn[:-5]
+                label = data.get("archive_name") or data.get("workspace") or fn[:-5]
             else:
                 label = "%s / %s" % (data.get("workspace") or "?",
-                                     data.get("session", {}).get("name") or fn[:-5])
+                                     data.get("archive_name")
+                                     or data.get("session", {}).get("name") or fn[:-5])
             yield kind, label, path, data
 
 
 def resolve_archive(name):
     """Find an archive by workspace name, session name, or 'workspace / session'."""
     hits = [(k, l, p, d) for k, l, p, d in iter_archives()
-            if l == name or (k == "session" and (d.get("session", {}).get("name") == name))]
+            if l == name or (k == "session" and name == (d.get("archive_name")
+                                                         or d.get("session", {}).get("name")))]
     if len(hits) > 1:
         die("%r matches %d archives — use the full label:\n  %s"
             % (name, len(hits), "\n  ".join(h[1] for h in hits)))
@@ -325,17 +339,18 @@ def cmd_archive(args):
         "sessions": sessions,
     }
     os.makedirs(ARCHIVE_DIR, exist_ok=True)
-    path = archive_path(ws.get("name") or "workspace")
-    if os.path.exists(path) and not args.force:
-        die("%s already archived (%s) — pass --force to overwrite" % (ws.get("name"), path))
+    path, suffix = free_path(archive_path(ws.get("name") or "workspace"), args.force)
+    if suffix:
+        snap["archive_name"] = (ws.get("name") or "workspace") + suffix
     with open(path, "w") as fh:
         json.dump(snap, fh, indent=1)
 
     claudes = sum(1 for s in sessions for p in s["panes"] if p["claude_session_id"])
     missing = sum(1 for s in sessions for p in s["panes"]
                   if p.get("agent") and not p["claude_session_id"])
-    print("archived %r: %d session(s), %d agent(s) resumable" %
-          (ws.get("name"), len(sessions), claudes))
+    print("archived %r%s: %d session(s), %d agent(s) resumable" %
+          (ws.get("name"), " as %r" % snap["archive_name"] if suffix else "",
+           len(sessions), claudes))
     if missing:
         print("  WARNING: %d agent pane(s) had no captured id and will come back as a "
               "plain shell (agterm-backup hook not installed, or that session never acted)"
@@ -347,8 +362,10 @@ def cmd_archive(args):
         return 0
     agtermctl("workspace", "delete", "--target", ws.get("id"))
     log("archived %r (%d sessions, %d claudes)" % (ws.get("name"), len(sessions), claudes))
-    notify("archived %s — %d session(s)" % (ws.get("name"), len(sessions)))
-    print("  workspace closed. Bring it back with: agterm-archive restore %r" % ws.get("name"))
+    notify("archived %s — %d session(s)" % (snap.get("archive_name") or ws.get("name"),
+                                           len(sessions)))
+    print("  workspace closed. Bring it back with: agterm-archive restore %r"
+          % (snap.get("archive_name") or ws.get("name")))
     return 0
 
 
@@ -369,18 +386,18 @@ def cmd_archive_session(args):
         "session": snap_session(sess),
     }
     os.makedirs(SESSION_DIR, exist_ok=True)
-    path = session_path(ws.get("name"), sess.get("name"))
-    if os.path.exists(path) and not args.force:
-        die("%s / %s already archived (%s) — pass --force to overwrite"
-            % (ws.get("name"), sess.get("name"), path))
+    path, suffix = free_path(session_path(ws.get("name"), sess.get("name")), args.force)
+    if suffix:
+        snap["archive_name"] = (sess.get("name") or "session") + suffix
     with open(path, "w") as fh:
         json.dump(snap, fh, indent=1)
 
     agents = sum(1 for p in snap["session"]["panes"] if p.get("claude_session_id"))
     missing = sum(1 for p in snap["session"]["panes"]
                   if p.get("agent") and not p.get("claude_session_id"))
-    print("archived session %r from %r (%d agent(s) resumable)"
-          % (sess.get("name"), ws.get("name"), agents))
+    print("archived session %r from %r%s (%d agent(s) resumable)"
+          % (sess.get("name"), ws.get("name"),
+             " as %r" % snap["archive_name"] if suffix else "", agents))
     if missing:
         print("  WARNING: %d agent pane(s) had no captured id and will come back as a "
               "plain shell" % missing)
@@ -390,9 +407,9 @@ def cmd_archive_session(args):
         return 0
     agtermctl("session", "close", "--target", sid)
     log("archived session %r / %r" % (ws.get("name"), sess.get("name")))
-    notify("archived session %s" % (sess.get("name") or sid[:8]))
+    notify("archived session %s" % (snap.get("archive_name") or sess.get("name") or sid[:8]))
     print("  session closed. Bring it back with: agterm-archive restore %r"
-          % (sess.get("name") or ""))
+          % (snap.get("archive_name") or sess.get("name") or ""))
     return 0
 
 
@@ -649,13 +666,13 @@ def main():
     a = sub.add_parser("archive", help="snapshot a workspace and close it")
     a.add_argument("workspace", nargs="?", help="name or id (default: active workspace)")
     a.add_argument("--keep", action="store_true", help="snapshot without closing")
-    a.add_argument("--force", action="store_true", help="overwrite an existing archive")
+    a.add_argument("--force", action="store_true", help="overwrite an existing archive instead of saving as <name>_1, _2, ...")
     a.set_defaults(fn=cmd_archive)
 
     ss = sub.add_parser("session", help="snapshot a single session and close it")
     ss.add_argument("session", nargs="?", help="session id/prefix or name (default: active)")
     ss.add_argument("--keep", action="store_true", help="snapshot without closing")
-    ss.add_argument("--force", action="store_true", help="overwrite an existing archive")
+    ss.add_argument("--force", action="store_true", help="overwrite an existing archive instead of saving as <name>_1, _2, ...")
     ss.set_defaults(fn=cmd_archive_session)
 
     l = sub.add_parser("list", help="list archived workspaces and sessions")
