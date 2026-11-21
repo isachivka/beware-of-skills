@@ -49,26 +49,9 @@ share lowkey's sign-ins).
 
 ## Commands
 
-Every command is `lowkeyctl <alias> <command>`. Exit 0 = done, 1 = refused (message on
-stderr as `lowkeyctl: <reason>`), 64 = bad usage.
-
-| Command | Effect |
-|---|---|
-| `open` | Create or bring back the window. Starts lowkey if it is not running. |
-| `toggle` | Frontmost → hide; otherwise show. Starts lowkey if needed. |
-| `hide` | Hide the window; the page keeps running. No-op if lowkey is not running. |
-| `rewind` | Show the window and navigate to the site's start URL. |
-| `status [--json]` | `{"alias","open","visible","minimized","focused","loading"}`. Never raises the window, never starts the app. |
-| `inspect [--json]` | Controls on the page: `type`, `labels`, `disabled`, `visible`. No current values. |
-| `wait [label] [--timeout N]` | Wait for DOM ready, or for a visible enabled control with that exact label. Default 10 s, 1–300. Not network idle. |
-| `fill <label> <value>` | Set a text input / textarea. |
-| `select <label> <option text>` | Pick an option by its display text. |
-| `click <label>` | Click a button or link. |
-| `upload <file> [--field <label>]` | Attach a file to the page's only file input, or the one named by `--field`. |
-| `save-pdf <file.pdf>` | Print the whole current document to an A4 PDF. Refuses to overwrite. |
-
-Window commands also work as deep links (`open 'lowkey://<alias>/reload'`, `/back`, `/forward`,
-`/start`, `/close`) — use those for reload/back/forward, which `lowkeyctl` has no command for.
+Run `lowkeyctl --help` for the command list and syntax. Exit 0 = done, 1 = refused (reason on
+stderr as `lowkeyctl: <reason>`), 64 = bad usage. Reload, back and forward have no command; use
+the deep links `open 'lowkey://<alias>/reload'` (`/back`, `/forward`, `/start`, `/close`).
 
 ## Labels are exact
 
