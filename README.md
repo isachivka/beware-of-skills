@@ -21,6 +21,7 @@ and Codex CLI.
 | [decomment](#decomment)           | Strip the comments an agent left that just restate the code                                 |
 | [cleanup](#cleanup)               | Tidy up after yourself and close your own agterm session                                     |
 | [agterm-ask](#agterm-ask)         | Ask a decision as a rich HTML page in an agterm overlay instead of AskUserQuestion           |
+| [lowkey](#lowkey)                 | Drive the lowkey browser from an agent: fill, click, upload, read a page as PDF, as the person |
 
 Requirements vary by skill and are listed per skill below; the agterm ones need
 [agterm](https://github.com/umputun/agterm) on macOS, the review ones need
@@ -292,6 +293,19 @@ after picking (every change is saved as a draft), or exit 3 if it was closed wit
 Inside agterm a PreToolUse hook (`plugins/bos/hooks/hooks.json`) denies AskUserQuestion and points
 the agent here; outside agterm it does nothing. To keep AskUserQuestion, set `"BOS_ASK_HOOK": "0"`
 under `env` in `~/.claude/settings.json`.
+
+### lowkey
+
+Lets an agent work in [lowkey](https://bobuk.io/apps/lowkey/), a minimal WebKit browser where
+each saved site has its own signed-in profile, through its `lowkeyctl` helper: show or hide a
+site's window, list the page's controls, fill a labelled field, pick an option, click a button,
+attach a file, wait for a control, and read the page by exporting it to PDF. The agent acts
+inside the person's own session, so it confirms before anything that sends or changes data and
+never retries a click.
+
+**Requires:** lowkey 0.1.2+ in `/Applications`, `lowkeyctl` on PATH, `pdftotext` for reading pages.
+
+**Triggers:** lowkey, lowkeyctl, "click X on <alias>", "fill the form on <alias>", "save <alias> as PDF".
 
 ### cleanup
 
